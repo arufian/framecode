@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%276%27 fill=%27%237c9cff%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/__studio/app.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="title"><span class="dot"></span><strong id="title">Video Studio</strong><span id="meta" class="muted"></span></div>
+    <div class="badges">
+      <span id="audio-badge" class="badge">audio</span>
+      <span id="perf-badge" class="badge" title="Average draw time per frame in this browser">— ms</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="stage-wrap">
+      <div id="stage" class="stage">
+        <canvas id="view"></canvas>
+        <div id="safe" class="safe hidden"><div class="action"></div><div class="title-safe"></div></div>
+        <pre id="error" class="error hidden"></pre>
+        <div id="loading" class="loading">Loading project…</div>
+      </div>
+
+      <div class="transport">
+        <button id="play" class="primary" title="Play / pause (Space)">▶</button>
+        <button id="prev-scene" title="Previous scene ([)">⏮</button>
+        <button id="step-back" title="Back one frame (←)">‹</button>
+        <button id="step-fwd" title="Forward one frame (→)">›</button>
+        <button id="next-scene" title="Next scene (])">⏭</button>
+        <span id="clock" class="clock">0:00.00</span>
+        <span id="frame" class="muted mono">frame 0</span>
+        <span class="spacer"></span>
+        <label class="toggle" title="Loop the current scene (L)"><input id="loop" type="checkbox"> loop scene</label>
+        <label class="toggle" title="Mute (M)"><input id="mute" type="checkbox"> mute</label>
+        <label class="toggle" title="Safe-area guides (S)"><input id="safe-toggle" type="checkbox"> safe area</label>
+        <select id="speed" title="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select>
+        <select id="zoom" title="Preview size"><option value="fit" selected>Fit</option><option value="0.5">50%</option><option value="1">100%</option></select>
+      </div>
+
+      <div class="track-wrap">
+        <canvas id="track"></canvas>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="panel">
+        <h2>Now</h2>
+        <div id="now-scene" class="now-scene">—</div>
+        <div id="now-line" class="now-line muted">No voice line</div>
+      </div>
+
+      <div class="panel grow">
+        <h2>Review notes <span id="note-count" class="muted"></span></h2>
+        <form id="note-form">
+          <textarea id="note-text" rows="3" placeholder="What should change at this moment? (N)"></textarea>
+          <button type="submit" id="note-add" class="primary wide">Add note at 0:00.00</button>
+        </form>
+        <ol id="notes" class="notes"></ol>
+        <p class="hint muted">Notes are saved to <code>review/notes.json</code>. Tell the agent when you're done reviewing.</p>
+      </div>
+
+      <div class="panel keys">
+        <h2>Keys</h2>
+        <p><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1 s · <kbd>[</kbd><kbd>]</kbd> scene · <kbd>Home</kbd><kbd>End</kbd> · <kbd>L</kbd> loop · <kbd>M</kbd> mute · <kbd>S</kbd> safe · <kbd>N</kbd> note</p>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="/__studio/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "video-project",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "node engine/studio.js --open",
+    "check": "node engine/render.js --check",
+    "stills": "node engine/render.js --stills auto",
+    "render": "node engine/render.js",
+    "render:draft": "node engine/render.js --draft"
+  }
+}

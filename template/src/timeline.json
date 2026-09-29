@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "title": "Made in Code",
+  "fps": 60,
+  "width": 1920,
+  "height": 1080,
+  "durationInFrames": 1000,
+  "bpm": 90.0,
+  "language": "en",
+  "captions": true,
+  "theme": {},
+  "scenes": [
+    {
+      "id": "S1",
+      "component": "title",
+      "from": 0,
+      "durationInFrames": 350,
+      "inFrames": 0,
+      "outFrames": 60,
+      "transitionOut": {
+        "type": "iris",
+        "durationInFrames": 60,
+        "params": {
+          "center": [
+            0.5,
+            0.64
+          ],
+          "ring": "#e4572e"
+        }
+      },
+      "params": {
+        "chapter": "01 · hello",
+        "title": "Every frame, drawn in code."
+      },
+      "hold": false,
+      "lines": [
+        "S1-01"
+      ]
+    },
+    {
+      "id": "S2",
+      "component": "explainer",
+      "from": 290,
+      "durationInFrames": 503,
+      "inFrames": 60,
+      "outFrames": 66,
+      "transitionOut": {
+        "type": "tear",
+        "durationInFrames": 66,
+        "params": {
+          "direction": "right"
+        }
+      },
+      "params": {
+        "chapter": "02 · how",
+        "steps": [
+          "Script",
+          "Voice + music",
+          "Frames"
+        ]
+      },
+      "hold": false,
+      "lines": [
+        "S2-01"
+      ]
+    },
+    {
+      "id": "S3",
+      "component": "outro",
+      "from": 727,
+      "durationInFrames": 273,
+      "inFrames": 66,
+      "outFrames": 0,
+      "transitionOut": {
+        "type": "cut",
+        "durationInFrames": 0,
+        "params": {}
+      },
+      "params": {
+        "chapter": "03 · you",
+        "title": "Your turn.",
+        "subtitle": "Describe a video. Watch it get made."
+      },
+      "hold": false,
+      "lines": [
+        "S3-01"
+      ]
+    }
+  ],
+  "lines": [
+    {
+      "id": "S1-01",
+      "scene": "S1",
+      "speaker": "narrator",
+      "text": "Every frame of this video is drawn in code.",
+      "sceneFrom": 21,
+      "durationInFrames": 220,
+      "src": null,
+      "from": 21
+    },
+    {
+      "id": "S2-01",
+      "scene": "S2",
+      "speaker": "narrator",
+      "text": "A script becomes a voice, a soundtrack, and sixty frames every second.",
+      "sceneFrom": 81,
+      "durationInFrames": 289,
+      "src": null,
+      "from": 371
+    },
+    {
+      "id": "S3-01",
+      "scene": "S3",
+      "speaker": "narrator",
+      "text": "Now it's your turn.",
+      "sceneFrom": 87,
+      "durationInFrames": 104,
+      "src": null,
+      "from": 814
+    }
+  ],
+  "sfx": [
+    {
+      "id": "sfx-01",
+      "type": "pop",
+      "scene": "S1",
+      "syncFrame": 18,
+      "gainDb": null,
+      "params": {}
+    },
+    {
+      "id": "sfx-02",
+      "type": "whoosh",
+      "scene": "S1",
+      "syncFrame": 320,
+      "gainDb": null,
+      "params": {}
+    },
+    {
+      "id": "sfx-03",
+      "type": "pencil",
+      "scene": "S2",
+      "syncFrame": 350,
+      "gainDb": null,
+      "params": {}
+    },
+    {
+      "id": "sfx-04",
+      "type": "paper",
+      "scene": "S2",
+      "syncFrame": 760,
+      "gainDb": null,
+      "params": {}
+    },
+    {
+      "id": "sfx-05",
+      "type": "chime",
+      "scene": "S3",
+      "syncFrame": 769,
+      "gainDb": null,
+      "params": {}
+    }
+  ],
+  "music": {
+    "style": "ambient",
+    "key": "D",
+    "seed": 7,
+    "bpm": 90.0,
+    "src": "music/music.wav",
+    "sections": [
+      {
+        "scene": "S1",
+        "start": 0.0,
+        "end": 5.3333,
+        "energy": 0.35
+      },
+      {
+        "scene": "S2",
+        "start": 5.3333,
+        "end": 12.6667,
+        "energy": 0.7
+      },
+      {
+        "scene": "S3",
+        "start": 12.6667,
+        "end": 16.6667,
+        "energy": 0.4
+      }
+    ]
+  },
+  "audio": {
+    "vo": false,
+    "music": true,
+    "sfx": true,
+    "mix": "audio/mix.wav",
+    "voices": {
+      "narrator": "af_heart"
+    }
+  }
+}

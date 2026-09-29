@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.bak.*
+.playwright-mcp/
+template/node_modules/
+template/out/

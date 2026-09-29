@@ -1,0 +1,41 @@
+{
+  "title": "Made in Code",
+  "language": "en",
+  "format": { "aspect": "16:9", "width": 1920, "height": 1080, "fps": 60 },
+  "captions": true,
+  "snap": "beat",
+  "audio": {
+    "voiceover": { "backend": "kokoro", "voices": { "narrator": "af_heart" }, "speed": 1.0 },
+    "music": { "style": "ambient", "bpm": 90, "key": "D", "seed": 7 },
+    "sfx": { "density": "subtle" }
+  },
+  "scenes": [
+    {
+      "id": "S1",
+      "component": "title",
+      "min_seconds": 4.5,
+      "params": { "chapter": "01 · hello", "title": "Every frame, drawn in code." },
+      "lines": [{ "speaker": "narrator", "text": "Every frame of this video is drawn in code." }],
+      "transition_out": { "type": "iris", "center": [0.5, 0.64], "ring": "#e4572e" },
+      "sfx": [{ "type": "pop", "at": 0.3 }, { "type": "whoosh", "at": "transition_out" }]
+    },
+    {
+      "id": "S2",
+      "component": "explainer",
+      "min_seconds": 6,
+      "params": { "chapter": "02 · how", "steps": ["Script", "Voice + music", "Frames"] },
+      "lines": [{ "speaker": "narrator", "text": "A script becomes a voice, a soundtrack, and sixty frames every second." }],
+      "transition_out": { "type": "tear", "direction": "right" },
+      "sfx": [{ "type": "pencil", "at": 1.0 }, { "type": "paper", "at": "transition_out" }]
+    },
+    {
+      "id": "S3",
+      "component": "outro",
+      "min_seconds": 4,
+      "energy": 0.4,
+      "params": { "chapter": "03 · you", "title": "Your turn.", "subtitle": "Describe a video. Watch it get made." },
+      "lines": [{ "speaker": "narrator", "text": "Now it's your turn." }],
+      "sfx": [{ "type": "chime", "at": 0.7 }]
+    }
+  ]
+}
