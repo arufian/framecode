@@ -6,32 +6,19 @@
 //   node engine/studio.js [--port 4600] [--open]
 
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { send, serveStatic } from './server.js';
 
 const root = process.cwd();
-const studioDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'studio');
 const args = process.argv.slice(2);
 const port = Number(args[args.indexOf('--port') + 1]) || Number(process.env.STUDIO_PORT) || 4600;
 const host = '127.0.0.1';
 const notesFile = path.join(root, 'review', 'notes.json');
 
-const TYPES = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.wav': 'audio/wav', '.mp3': 'audio/mpeg',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-  '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf',
-};
-
 const readNotes = () => { try { return JSON.parse(readFileSync(notesFile, 'utf8')); } catch { return []; } };
 const writeNotes = (notes) => { mkdirSync(path.dirname(notesFile), { recursive: true }); writeFileSync(notesFile, JSON.stringify(notes, null, 2) + '\n'); };
-
-function send(res, status, body, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
-  res.end(typeof body === 'string' ? body : JSON.stringify(body));
-}
 
 function body(req) {
   return new Promise((resolve, reject) => {
@@ -39,25 +26,6 @@ function body(req) {
     req.on('data', (c) => { data += c; if (data.length > 1e6) req.destroy(); });
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
   });
-}
-
-/** Static files with Range support (browsers need it to seek audio). Dotfiles are never served. */
-function serveFile(req, res, file) {
-  let stat;
-  try { stat = statSync(file); } catch { return send(res, 404, { error: 'not found' }); }
-  if (!stat.isFile()) return send(res, 404, { error: 'not found' });
-  const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
-  const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
-  if (range) {
-    const start = range[1] ? Number(range[1]) : 0;
-    const end = range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1;
-    res.writeHead(206, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-      'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store' });
-    createReadStream(file, { start, end }).pipe(res);
-    return;
-  }
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' });
-  createReadStream(file).pipe(res);
 }
 
 function audioStatus() {
@@ -99,12 +67,6 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}`);
   const pathname = decodeURIComponent(url.pathname);
   try {
-    if (pathname === '/' || pathname === '/index.html') return serveFile(req, res, path.join(studioDir, 'index.html'));
-    if (pathname.startsWith('/__studio/')) {
-      const file = path.join(studioDir, pathname.slice('/__studio/'.length));
-      if (!file.startsWith(studioDir)) return send(res, 403, { error: 'forbidden' });
-      return serveFile(req, res, file);
-    }
     if (pathname === '/__events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
       res.write('retry: 1000\n\n');
@@ -134,11 +96,7 @@ const server = createServer(async (req, res) => {
       writeNotes(notes);
       return send(res, 200, notes[index] || { deleted: match[1] });
     }
-    const file = path.join(root, pathname);
-    if (!file.startsWith(root + path.sep) || pathname.split('/').some((part) => part.startsWith('.'))) {
-      return send(res, 403, { error: 'forbidden' });
-    }
-    return serveFile(req, res, file);
+    return serveStatic(req, res, root, pathname);
   } catch (error) {
     return send(res, 500, { error: String(error) });
   }

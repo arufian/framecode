@@ -1,6 +1,6 @@
 ---
 name: framecode
-description: Produce a brand-new video end to end with a coding agent, with every frame, animation, music bed, and sound effect generated in code (no Remotion, HyperFrames, or other video frameworks; no stock media). Interviews the user (including voice-over via ElevenLabs, Kokoro, or Coqui TTS; generated music; generated sound effects; and a do-not list), writes a storyboard plan, confirms it, builds smooth animated scenes on a bundled Canvas engine, lets the user review everything in a live studio with notes, asks the output size, renders to MP4, runs automated QC plus a visual review, and loops on fixes. Use when the user wants to create a video, explainer, animation, or motion graphic from scratch.
+description: Produce a brand-new video end to end with a coding agent, with every frame, animation, music bed, and sound effect generated in code (no Remotion, HyperFrames, or other video frameworks; no stock media). Interviews the user (including voice-over via ElevenLabs, Kokoro, or Coqui TTS; generated music; generated sound effects; and a do-not list), writes a storyboard plan, confirms it, builds smooth animated scenes as p5.js sketches on a bundled engine, lets the user review everything in a live studio with notes, asks the output size, renders to MP4, and loops on fixes. Use when the user wants to create a video, explainer, animation, or motion graphic from scratch.
 ---
 
 # Video Builder
@@ -9,11 +9,11 @@ Build a new video from user requirements through reviewed, verified delivery.
 
 This workflow is coding-agent agnostic. Use the host agent's available tools and obey its current mode, tool schemas, and permission rules.
 
-Workflow: interview → plan → confirm → scaffold → audio → build scenes → self-check → **studio review** → **ask render size** → render → QC + frame review → fix loop → done.
+Workflow: interview → plan → confirm → scaffold → audio → build scenes → self-check → **studio review** → **ask render size** → render → fix loop → done.
 
 Everything on screen and in the soundtrack is made by code the agent writes:
 
-- **Visuals**: the bundled engine (`template/engine/`, plain JavaScript on the Canvas 2D API). The browser studio runs it live; the renderer runs the same code in Node on `@napi-rs/canvas` (only a drawing surface) and pipes frames to ffmpeg. Do not use Remotion, HyperFrames, Motion Canvas, Manim, or any other video/animation framework, and do not use stock footage, stock images, or AI image generators. User-supplied assets (logo, photos, character art) are the only external visuals.
+- **Visuals**: scenes are p5.js sketches (p5 2.x) on the bundled engine (`template/engine/`), which owns the timeline, the clock, transitions, and compositing. The browser studio runs them live; the renderer runs the same page in headless Chrome (Puppeteer) and pipes frames to ffmpeg. p5.js is the only drawing library: do not use Remotion, HyperFrames, Motion Canvas, Manim, or any other video/animation framework (GSAP, three.js, anime.js), and do not use stock footage, stock images, or AI image generators. User-supplied assets (logo, photos, character art) are the only external visuals.
 - **Music and SFX**: synthesized by `scripts/gen_music.py` and `scripts/gen_sfx.py` (numpy oscillators and noise, royalty-free by construction).
 - **Voice-over**: ElevenLabs (API), Kokoro (local), or Coqui (local), through `scripts/voiceover.py`.
 
@@ -139,7 +139,7 @@ Write `VIDEO_PLAN.md` (human plan) and `storyboard.json` (machine storyboard the
 - [ ] AC-1 <checkable statement; map to scene IDs and DN items>
 ```
 
-Every scene must map to at least one acceptance criterion; every DN item must map to a check in Phase 11.
+Every scene must map to at least one acceptance criterion; every DN item must be checked in the Phase 7 self-check.
 
 `storyboard.json` schema (see `template/storyboard.json` for a complete example):
 
@@ -154,7 +154,7 @@ Every scene must map to at least one acceptance criterion; every DN item must ma
     "sfx": { "density": "subtle|moderate|rich" }
   },
   "scenes": [
-    { "id": "S1", "component": "title", "min_seconds": 4.5, "energy": 0.35, "hold": false,
+    { "id": "S1", "component": "title", "min_seconds": 4.5, "energy": 0.35,
       "params": { "any": "data the scene draws" },
       "lines": [ { "speaker": "narrator", "text": "Shown in captions.", "say": "Optional pronunciation override.", "at": null, "gap_after": 0.25 } ],
       "transition_out": { "type": "cut|fade|dissolve|zoom|slide|wipe|iris|tear", "seconds": 1.0, "...": "type params" },
@@ -185,11 +185,12 @@ Then ask: approve this plan and start production? Options: yes / revise (loop ba
 
 ```bash
 cp -R "$VIDEO_SKILL_DIR/template/." .
-npm install --save-exact @napi-rs/canvas @fontsource/inter @fontsource/jetbrains-mono   # plus fonts the plan needs
+npm install --save-exact p5@2 puppeteer @fontsource/inter @fontsource/jetbrains-mono   # plus fonts the plan needs
 python3 "$VIDEO_SKILL_DIR/scripts/preflight.py"
 ```
 
-- `preflight.py` must pass (Node ≥ 18, ffmpeg with QC filters, Python ≥ 3.9 with numpy + scipy). Node installed through nvm is often a lazy shell function that subprocesses cannot see; preflight prints the real binary — prefix commands with `PATH=<its dir>:$PATH` when needed.
+- `preflight.py` must pass (Node ≥ 22.12, ffmpeg + ffprobe, Python ≥ 3.9 with numpy + scipy, and in the project: p5.js, Puppeteer, headless Chrome). Node installed through nvm is often a lazy shell function that subprocesses cannot see; preflight prints the real binary — prefix commands with `PATH=<its dir>:$PATH` when needed.
+- Installing Puppeteer downloads `chrome-headless-shell` once (~200 MB, cached in `~/.cache/puppeteer`; the template's `.puppeteerrc.cjs` skips the full Chrome). If the download is blocked, run `npx puppeteer browsers install chrome-headless-shell` later, or point `FRAMECODE_BROWSER` (or `render.js --browser`) at an installed Chrome/Chromium.
 - Replace the example `storyboard.json` with the planned one, set the palette in `theme.js`, register fonts and user images in `project.js`, and remove example scenes the plan does not use.
 - Local TTS: create a project-local environment as shown in `references/audio.md` (`.venv-tts`), then run `voiceover.py` with that interpreter.
 
@@ -207,7 +208,7 @@ python3 "$VIDEO_SKILL_DIR/scripts/gen_sfx.py" --timeline src/timeline.json      
 python3 "$VIDEO_SKILL_DIR/scripts/mix_audio.py"           # skip only when there is no audio at all
 ```
 
-- `timeline.py` sizes every scene to fit its lines (plus lead-in, tail, and both transitions), snaps transition midpoints and the ending to the music's beat grid, places captions, and computes SFX sync frames. `src/timeline.json` is the single source of truth for the engine, the mixer, and QC.
+- `timeline.py` sizes every scene to fit its lines (plus lead-in, tail, and both transitions), snaps transition midpoints and the ending to the music's beat grid, places captions, and computes SFX sync frames. `src/timeline.json` is the single source of truth for the engine and the mixer.
 - `mix_audio.py` ducks music under speech and masters to -14 LUFS / -1.5 dBTP (`--lufs`, `--tp`, `--music-db`, `--duck-db`, `--sfx-db` to rebalance).
 - Voice lines are cached by content; only changed lines are regenerated (important with ElevenLabs credits).
 - When something changes, re-run from the first affected step: script/voices → all five; music only → music + mix; SFX only → SFX + mix; visuals only → nothing.
@@ -217,35 +218,47 @@ python3 "$VIDEO_SKILL_DIR/scripts/mix_audio.py"           # skip only when there
 
 ## Phase 6 — Build the scenes in code
 
-Before writing scene code, read `references/engine.md` (API), `references/motion.md` (motion rules and recipes), and `references/style.md` (visual craft). Then write one module in `scenes/` per storyboard `component`.
+Before writing scene code, read `references/engine.md` (API, including "p5 in scenes"), `references/motion.md` (motion rules and recipes), and `references/style.md` (visual craft). Then write one module in `scenes/` per storyboard `component`.
 
-- A scene is `{ setup?(ctx), draw(ctx, s) }`. `setup` computes layout once; `draw` paints one frame from the scene context `s` (`s.t`, `s.frame`, `s.enter()`, `s.exit()`, `s.life()`, `s.spring()`, `s.line(n)`, `s.speaking()`, `s.params`, `s.state`, …).
+- A scene is `{ setup?(info), draw(p, s) }`. `setup` computes layout once; `draw` paints one frame with the p5 instance `p` from the scene context `s` (`s.t`, `s.frame`, `s.enter()`, `s.exit()`, `s.life()`, `s.spring()`, `s.line(n)`, `s.speaking()`, `s.params`, `s.state`, …).
+- Draw with p5 (`p.fill`, `p.circle`, `p.beginShape`, `p.translate`, `p.noise`, `p.text`, …) and the `engine/draw.js` helpers, which take `p` too (`paper(p, …)`, `sketch(p, …)`, `mascot(p, …)`, `wordsIn(p, …)`); they mix freely and share transforms.
 - Draw everything procedurally: paths, gradients, textures, characters, text. Build illustrations in layers (background, midground, subject, foreground, chrome) the way the references in `references/style.md` do; a flat slide with a fading title is not the bar.
 - Persistent chrome (progress ring, captions, grain) lives in `project.js` `overlay`; per-scene chrome (chapter label) lives in the scene so it transitions with it.
 - Honor every DN item. Keep all motion frame-driven and deterministic.
 
+### p5 rules (mandatory — details in `references/engine.md` → "p5 in scenes")
+
+1. **The engine owns the canvas, the loop, and the clock.** Never call `createCanvas`, `resizeCanvas`, `pixelDensity`, `frameRate`, `loop`/`noLoop`/`redraw`, `saveCanvas`, or `remove`, and never assign `p.setup`/`p.draw`. Sizes are design pixels (`s.w`, `s.h`).
+2. **Time is `s.t`/`s.frame`.** `frameCount`, `millis()`, and `deltaTime` are mapped to the scene's clock, but `frameCount` counts whole frames only, so motion blur sub-frames need `s.t`.
+3. **Randomness is seeded per scene, every frame.** `p.random()`, `p.randomGaussian()`, and `p.noise()` return the same values every frame (stable layouts); feed time into noise for motion (`p.noise(i, s.t * 0.3)`). Take all of an element's `random()` values before any `continue`/`return`, or later values shift and flicker. Never `Math.random`; never `g.random()` on a buffer (unseeded).
+4. **No input, DOM, or loading.** No mouse/keyboard/touch handlers, `createDiv`/`createSlider`, `p5.sound`, or `createCapture`. No `loadImage`/`loadFont`/`loadJSON` in scenes: register fonts and images in `project.js`; images arrive as `p5.Image` in `s.assets.images`, fonts by family name (`p.textFont(THEME.font)`, `p.textWeight(800)`).
+5. **Offscreen drawing goes through `buffer()`/`baked()`** from `draw.js` (design-px size, sharp at every output scale, 3D with `{ webgl: true }`). Never call `createGraphics` per frame.
+6. **State resets every frame.** Fill, stroke, transforms, text settings, and blend mode start fresh in each `draw`; wrap local changes in `p.push()`/`p.pop()`. Fade groups with `opacity(p, a)`; blur with `setBlur(p, px)` (not `p.filter(BLUR)`, which is slow).
+
 ### Motion quality rules (mandatory — details and code in `references/motion.md`)
 
-1. **Frame-driven and deterministic.** All animation is a function of `s.frame`/`s.t`; fractional frames must work (motion blur renders sub-frames). No `Date`, `Math.random`, timers, CSS or DOM animation. Use `rng(seed)` and `noise2`/`fbm`.
+1. **Frame-driven and deterministic.** All animation is a function of `s.frame`/`s.t`; fractional frames must work (motion blur renders sub-frames). No `Date`, `Math.random`, timers, CSS or DOM animation, or p5's own draw loop. Use the seeded `p.random()`/`p.noise()`, or `rng(seed)` and `noise2`/`fbm`.
 2. **Eased, never linear** — except constant drifts (parallax, slow pans, grain). Entrances `EASE.enter` or `SPRING.gentle`/`SPRING.snappy`; exits `EASE.exit`; moves `EASE.move`. Bouncy springs only when the style asks for playful.
 3. **Nothing pops.** Every element enters and leaves over ≥ 0.25 s (`s.life`, `s.enter`, `s.exit`); exits finish by the outgoing transition's midpoint.
 4. **Layered entrances.** Hero elements combine opacity + 12–40 px travel + 4–8 px blur-to-sharp (+ optional 0.96→1 scale). Siblings stagger 60–120 ms; sentences use `wordsIn`.
-5. **Always alive.** Every scene carries ambient motion (drift, parallax, camera push ≤ 6 %, breathing characters, boiling lines, grain). QC fails any 1.5 s stretch without motion unless the scene is `"hold": true`.
+5. **Always alive.** Every scene carries ambient motion (drift, parallax, camera push ≤ 6 %, breathing characters, boiling lines, grain). No 1.5 s stretch goes without motion unless the plan calls for a still.
 6. **Smooth transitions at every boundary.** Use the engine's transitions (`fade`, `dissolve`, `zoom`, `slide`, `wipe`, `iris`, `tear`) or an in-world continuous move. The exiting scene stays opaque underneath (no brightness dip); motion and blur peak mid-transition; 0.6–1.1 s long. Hard cuts only when planned (`"type": "cut"`), ideally on the beat.
 7. **Sync to sound.** Transitions land on beats (timeline snapping); reveals start with the words that name them (`s.line(n).start`, `.p`); SFX sync points meet their visual (whoosh peak = transition midpoint, impact = the hit).
 8. **Readable.** Text stays on screen ≥ words ÷ 3 + 1 s; body text ≥ 28 px at 1080p; keep text inside the title-safe area (5 % vertical, 10 % horizontal; for 9:16 also avoid the bottom 20 % and right edge where platform UI sits); strong contrast.
-9. **60 fps by default.** Keep heavy work (textures, layouts) in `setup` or cached helpers so the studio plays in real time.
+9. **60 fps by default.** Keep heavy work in `setup` (layouts) or `baked()` buffers and cached helpers (textures) so the studio plays in real time.
 
 ---
 
 ## Phase 7 — Agent self-check (before the user sees anything)
 
 ```bash
-node engine/render.js --check                      # every key frame must draw without throwing
+node engine/render.js --check                      # every key frame must draw without throwing (in headless Chrome)
 node engine/render.js --stills auto --scale 0.5    # PNG per scene middle and transition middle -> out/stills/
 ```
 
-View every still with the host's image tool and check it against the storyboard, the style, the motion rules, and the DN list: composition, legibility, safe areas, overflowing or clipped text, stray elements, empty frames. Fix and repeat until clean. Report problems you fixed briefly.
+A scene error prints `FAIL` with the scene file and line; a scene stuck in an endless loop fails with a timeout instead of hanging.
+
+View every still with the host's image tool and check it against the storyboard, the acceptance criteria, the style, the motion rules, and the DN list: composition, legibility, safe areas, overflowing or clipped text, stray elements, empty frames. Fix and repeat until clean. Report problems you fixed briefly.
 
 ---
 
@@ -291,46 +304,29 @@ Say that 4K takes about 4× the render time and file size of 1080p; give an esti
 node engine/render.js --size <WxH>          # -> out/video.mp4 (picture) and out/final.mp4 (picture + mastered mix)
 ```
 
-- H.264, yuv420p, BT.709, CRF 16, `-preset slow`, parallel workers (`--workers N`), exact frame count.
+- Frames are drawn in headless Chrome by the same p5 code the studio ran, then encoded to H.264, yuv420p, BT.709, CRF 16, `-preset slow`, with parallel workers (`--workers N` Chrome pages, each with its own ffmpeg) and an exact frame count.
 - `--motion-blur 4` renders 4 sub-frames per frame (180° shutter) for very fast motion; it multiplies render time. Offer it only when the plan has fast moves.
 - If there is no audio at all, `out/video.mp4` is the deliverable.
 
 ---
 
-## Phase 11 — QC and agent verification
+## Phase 11 — Fix loop
 
-```bash
-python3 "$VIDEO_SKILL_DIR/scripts/qc_video.py" --video out/final.mp4 --size <WxH>   # or out/video.mp4 without audio
-```
-
-Automated checks (all must pass): codec, pixel format, resolution, fps, exact frame count, audio stream, A/V duration, loudness (±1 LU of target), true peak, no black gaps, no frozen stretches, no unplanned hard cuts, no silent holes in the music. It writes `out/qc/report.json`, review frames, and `out/qc/contact.png`.
-
-Then verify like a viewer, not a test runner:
-
-1. View the contact sheet and review frames (scene middles, transition middles, and both sides of any flagged cut).
-2. Check each acceptance criterion and each DN item against what you see; if whisper is available, transcribe `out/final.mp4` and compare with the script.
-3. Report a checklist: expected ✓ / mismatch ✗.
-
----
-
-## Phase 12 — Fix loop
-
-If Phase 7, 11, or the user found any problem:
+If Phase 7 or the user found any problem:
 
 1. Fix the root cause.
-2. Re-run Phase 7 (check + stills), Phase 10 (render), and Phase 11 (QC + frame review) — all of them, every iteration. If the fix changes something the user approved, show it in the studio again before re-rendering.
+2. Re-run Phase 7 (check + stills) and Phase 10 (render) — both, every iteration. If the fix changes something the user approved, show it in the studio again before re-rendering.
 3. Repeat until everything is clean.
 
 Note the loop count; 3+ iterations on the same area signal a planning problem — revisit `VIDEO_PLAN.md` instead of patching again.
 
 ---
 
-## Phase 13 — Done
+## Phase 12 — Done
 
 Tell the user:
 
-- Deliverable path, resolution, fps, duration, file size, loudness.
+- Deliverable path, resolution, fps, duration, file size, and loudness (as `mix_audio.py` reported it).
 - What was built vs. the acceptance criteria and DN list.
-- QC results and the agent verification checklist.
 - How to reopen the studio (`node engine/studio.js`), change a line or a scene, and re-render (`node engine/render.js --size <WxH>`).
 - Known limitations or ideas for a next version.

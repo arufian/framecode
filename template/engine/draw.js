@@ -1,8 +1,14 @@
-// Drawing toolkit for scenes: textures, hand-drawn strokes, text motion, callouts,
-// HUD pieces, captions, a camera, and a small character rig. All sizes are in
+// Drawing toolkit for p5 scenes: textures, hand-drawn strokes, text motion,
+// callouts, HUD pieces, captions, a camera, a small character rig, and p5 buffer
+// helpers. Every helper takes the p5 instance `p` (a p5.Graphics or a raw 2D
+// context also work) and draws through its 2D context, so helpers and p5 calls mix
+// freely and share transforms (p.translate, p.scale, camera). All sizes are in
 // design pixels; cached textures are rebuilt automatically at the current scale.
 
 import { clamp, lerp, EASE, rng, fbm, noise2, createLayer, TAU } from './core.js';
+
+/** The 2D context behind a p5 instance or p5.Graphics (a raw context passes through). */
+export const ctxOf = (g) => g.drawingContext ?? g;
 
 const currentScale = (ctx) => {
   const m = ctx.getTransform();
@@ -13,7 +19,8 @@ const currentScale = (ctx) => {
  * Blur in design pixels. Canvas filters ignore the transform, so a raw `blur(6px)` would
  * look smaller at 4K than at 1080p; this scales it. Pass 0 to clear.
  */
-export function setBlur(ctx, px) {
+export function setBlur(g, px) {
+  const ctx = ctxOf(g);
   const real = px * currentScale(ctx);
   ctx.filter = real > 0.25 ? `blur(${real.toFixed(2)}px)` : 'none';
 }
@@ -33,6 +40,44 @@ function cached(key, ctx, w, h, paint) {
   return textureCache.get(id);
 }
 
+// ------------------------------------------------------------------ p5 helpers
+
+/** Multiply the opacity of everything drawn next (shapes, text, images). Use inside p.push()/p.pop(). */
+export function opacity(g, a) {
+  ctxOf(g).globalAlpha *= clamp(a);
+}
+
+const buffers = new Map();
+function bufferEntry(p, key, w, h, webgl) {
+  let entry = buffers.get(key);
+  if (entry && (entry.w !== w || entry.h !== h || entry.webgl !== webgl)) { entry.g.remove(); buffers.delete(key); entry = null; }
+  if (!entry) {
+    entry = { g: p.createGraphics(w, h, webgl ? p.WEBGL : p.P2D), w, h, webgl, density: 0, painted: false };
+    buffers.set(key, entry);
+    if (buffers.size > 24) { const [oldKey, old] = buffers.entries().next().value; old.g.remove(); buffers.delete(oldKey); }
+  }
+  const density = p.pixelDensity();
+  if (entry.density !== density) { entry.g.pixelDensity(density); entry.density = density; entry.painted = false; }
+  return entry;
+}
+
+/**
+ * A persistent offscreen p5.Graphics (w x h design px) at the current output scale; it
+ * is re-created when the scale changes (studio resize), so it stays sharp at 4K. Draw
+ * into it, then place it with p.image(g, x, y). { webgl: true } gives a 3D buffer
+ * (origin at its centre). Use p.random()/p.noise() for values: g.random() is unseeded.
+ */
+export function buffer(p, key, w, h, { webgl = false } = {}) {
+  return bufferEntry(p, key, w, h, webgl).g;
+}
+
+/** Like buffer(), but paint(g) runs once per scale: cached textures, static layers. Use rng() inside. */
+export function baked(p, key, w, h, paint, { webgl = false } = {}) {
+  const entry = bufferEntry(p, key, w, h, webgl);
+  if (!entry.painted) { entry.g.clear(); paint(entry.g); entry.painted = true; }
+  return entry.g;
+}
+
 // ------------------------------------------------------------------ colour
 
 export function hexToRgb(hex) {
@@ -50,18 +95,19 @@ export function mixColor(a, b, t) {
 // ------------------------------------------------------------------ backgrounds & textures
 
 /** Warm paper: mottled base, fibres, fine grain. Cached per size/scale/options. */
-export function paper(ctx, w, h, { base = '#f3ecdf', mottle = 0.07, fibres = 260, seed = 3 } = {}) {
+export function paper(g, w, h, { base = '#f3ecdf', mottle = 0.07, fibres = 260, seed = 3 } = {}) {
+  const ctx = ctxOf(g);
   const layer = cached(`paper:${base}:${mottle}:${fibres}:${seed}`, ctx, w, h, (c, scale) => {
     const r = rng(seed);
     c.fillStyle = base;
     c.fillRect(0, 0, w, h);
     for (let i = 0; i < 90; i++) {
       const x = r() * w, y = r() * h, rad = r.range(80, 420);
-      const g = c.createRadialGradient(x, y, 0, x, y, rad);
+      const grad = c.createRadialGradient(x, y, 0, x, y, rad);
       const dark = r() < 0.55;
-      g.addColorStop(0, dark ? `rgba(120,95,60,${mottle * r()})` : `rgba(255,255,255,${mottle * 1.4 * r()})`);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      c.fillStyle = g;
+      grad.addColorStop(0, dark ? `rgba(120,95,60,${mottle * r()})` : `rgba(255,255,255,${mottle * 1.4 * r()})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = grad;
       c.fillRect(x - rad, y - rad, rad * 2, rad * 2);
     }
     c.lineCap = 'round';
@@ -102,7 +148,8 @@ function drawLayer(ctx, layer) {
 }
 
 /** Diagonal stripes (pass `offset` = time * speed for a slow drift). */
-export function stripes(ctx, w, h, { colors = ['#efe6d4', '#dfe7ea'], width = 90, angle = -35, offset = 0 } = {}) {
+export function stripes(g, w, h, { colors = ['#efe6d4', '#dfe7ea'], width = 90, angle = -35, offset = 0 } = {}) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.fillStyle = colors[0];
   ctx.fillRect(0, 0, w, h);
@@ -121,14 +168,15 @@ export function stripes(ctx, w, h, { colors = ['#efe6d4', '#dfe7ea'], width = 90
 }
 
 /** Blueprint / night grid with a soft centre glow. `drift` pans the grid. */
-export function blueprint(ctx, w, h, { bg = '#0d1733', line = '#2a3d74', major = '#3b55a0', step = 48, drift = 0, glow = '#1f3a8a' } = {}) {
+export function blueprint(g, w, h, { bg = '#0d1733', line = '#2a3d74', major = '#3b55a0', step = 48, drift = 0, glow = '#1f3a8a' } = {}) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
-  const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.6);
-  g.addColorStop(0, rgba(glow, 0.35));
-  g.addColorStop(1, rgba(glow, 0));
-  ctx.fillStyle = g;
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.6);
+  grad.addColorStop(0, rgba(glow, 0.35));
+  grad.addColorStop(1, rgba(glow, 0));
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
   const off = ((drift % step) + step) % step;
   for (let i = -1, x = off - step; x < w + step; x += step, i++) {
@@ -144,24 +192,32 @@ export function blueprint(ctx, w, h, { bg = '#0d1733', line = '#2a3d74', major =
   ctx.restore();
 }
 
-export function vignette(ctx, w, h, { strength = 0.35, color = '#000000' } = {}) {
-  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.hypot(w, h) * 0.6);
-  g.addColorStop(0, rgba(color, 0));
-  g.addColorStop(1, rgba(color, strength));
-  ctx.fillStyle = g;
+// Helpers restore the context state they change, so p5's cached fill/stroke stays correct.
+export function vignette(g, w, h, { strength = 0.35, color = '#000000' } = {}) {
+  const ctx = ctxOf(g);
+  const grad = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.hypot(w, h) * 0.6);
+  grad.addColorStop(0, rgba(color, 0));
+  grad.addColorStop(1, rgba(color, strength));
+  ctx.save();
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
-export function glow(ctx, x, y, radius, color, alpha = 0.6) {
-  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-  g.addColorStop(0, rgba(color, alpha));
-  g.addColorStop(1, rgba(color, 0));
-  ctx.fillStyle = g;
+export function glow(g, x, y, radius, color, alpha = 0.6) {
+  const ctx = ctxOf(g);
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  grad.addColorStop(0, rgba(color, alpha));
+  grad.addColorStop(1, rgba(color, 0));
+  ctx.save();
+  ctx.fillStyle = grad;
   ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  ctx.restore();
 }
 
 /** Film grain overlay; changes every frame, which also prevents gradient banding after encoding. */
-export function grain(ctx, w, h, frame, { amount = 0.06, size = 256 } = {}) {
+export function grain(g, w, h, frame, { amount = 0.06, size = 256 } = {}) {
+  const ctx = ctxOf(g);
   const tile = cached(`grain:${size}`, ctx, size, size, (c, scale) => {
     const S = Math.ceil(size * scale);
     const img = c.getImageData(0, 0, S, S);
@@ -187,7 +243,8 @@ export function grain(ctx, w, h, frame, { amount = 0.06, size = 256 } = {}) {
 
 // ------------------------------------------------------------------ paths & hand-drawn strokes
 
-export function roundRect(ctx, x, y, w, h, r = 12) {
+export function roundRect(g, x, y, w, h, r = 12) {
+  const ctx = ctxOf(g);
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
@@ -256,7 +313,8 @@ export function wobble(points, { amp = 1.6, freq = 0.02, seed = 1, t = 0, boil =
   });
 }
 
-export function strokePath(ctx, points, { width = 3, color = '#1d1d1f', cap = 'round', alpha = 1, dash = null } = {}) {
+export function strokePath(g, points, { width = 3, color = '#1d1d1f', cap = 'round', alpha = 1, dash = null } = {}) {
+  const ctx = ctxOf(g);
   if (points.length < 2) return;
   ctx.save();
   ctx.globalAlpha *= alpha;
@@ -273,7 +331,8 @@ export function strokePath(ctx, points, { width = 3, color = '#1d1d1f', cap = 'r
 }
 
 /** Draw-on sketch stroke: wobble + partial reveal + a slightly offset second pass. */
-export function sketch(ctx, points, { p = 1, width = 3, color = '#1d1d1f', seed = 1, amp = 1.4, t = 0, boil = 0, double = true } = {}) {
+export function sketch(g, points, { p = 1, width = 3, color = '#1d1d1f', seed = 1, amp = 1.4, t = 0, boil = 0, double = true } = {}) {
+  const ctx = ctxOf(g);
   if (p <= 0) return;
   const main = partial(wobble(points, { amp, seed, t, boil }), p);
   strokePath(ctx, main, { width, color });
@@ -294,7 +353,8 @@ export const rectPoints = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [
 export const font = (size, weight = 400, family = 'Inter', style = 'normal') => `${style} ${weight} ${size}px "${family}"`;
 
 /** Split into lines that fit maxWidth. Spaces break Latin text; CJK breaks between characters. */
-export function wrapText(ctx, text, maxWidth) {
+export function wrapText(g, text, maxWidth) {
+  const ctx = ctxOf(g);
   const out = [];
   for (const paragraph of String(text).split('\n')) {
     const tokens = /\s/.test(paragraph) ? paragraph.split(/(\s+)/) : Array.from(paragraph);
@@ -310,8 +370,9 @@ export function wrapText(ctx, text, maxWidth) {
 }
 
 /** Multi-line text. Returns { width, height, lines }. */
-export function text(ctx, str, x, y, { size = 48, weight = 400, family = 'Inter', color = '#111', align = 'left',
+export function text(g, str, x, y, { size = 48, weight = 400, family = 'Inter', color = '#111', align = 'left',
   baseline = 'alphabetic', maxWidth = Infinity, lineHeight = 1.25, letterSpacing = 0, alpha = 1 } = {}) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.font = font(size, weight, family);
   ctx.fillStyle = color;
@@ -330,8 +391,9 @@ export function text(ctx, str, x, y, { size = 48, weight = 400, family = 'Inter'
  * Word-by-word entrance: each word rises, un-blurs, and fades in, staggered.
  * p = 0..1 over the whole sentence (e.g. s.enter(0.2, 1.4, EASE.linear)).
  */
-export function wordsIn(ctx, str, x, y, p, { size = 64, weight = 700, family = 'Inter', color = '#111', align = 'left',
+export function wordsIn(g, str, x, y, p, { size = 64, weight = 700, family = 'Inter', color = '#111', align = 'left',
   maxWidth = Infinity, lineHeight = 1.15, rise = 0.45, overlap = 3, blur = 6 } = {}) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.font = font(size, weight, family);
   ctx.textBaseline = 'alphabetic';
@@ -363,8 +425,9 @@ export function wordsIn(ctx, str, x, y, p, { size = 64, weight = 700, family = '
 }
 
 /** Typewriter with a blinking caret. p = 0..1 of characters shown; t = seconds (caret blink). */
-export function typewriter(ctx, str, x, y, p, t, { size = 28, weight = 500, family = 'JetBrains Mono', color = '#2f5bea',
+export function typewriter(g, str, x, y, p, t, { size = 28, weight = 500, family = 'JetBrains Mono', color = '#2f5bea',
   caret = true, lineHeight = 1.4 } = {}) {
+  const ctx = ctxOf(g);
   const chars = Array.from(str);
   const shown = chars.slice(0, Math.floor(clamp(p) * chars.length + 1e-6)).join('');
   const lines = shown.split('\n');
@@ -397,7 +460,8 @@ export function countUp(from, to, p, { decimals = 0, prefix = '', suffix = '', s
  * Annotation: a pulsing dot on the subject, an elbow leader line that draws on,
  * then the label. p = 0..1 (use s.life(...) so it also exits).
  */
-export function callout(ctx, p, { x, y, tx, ty, label, sub = '', color = '#1d1d1f', accent = '#e4572e', size = 26, t = 0, family = 'Inter' }) {
+export function callout(g, p, { x, y, tx, ty, label, sub = '', color = '#1d1d1f', accent = '#e4572e', size = 26, t = 0, family = 'Inter' }) {
+  const ctx = ctxOf(g);
   if (p <= 0) return;
   const dot = EASE.outBack(clamp(p / 0.25));
   ctx.save();
@@ -421,7 +485,8 @@ export function callout(ctx, p, { x, y, tx, ty, label, sub = '', color = '#1d1d1
 }
 
 /** Small chapter title with an underline that draws on (top-left chrome). */
-export function chapter(ctx, label, p, { x = 64, y = 72, size = 26, color = '#1d1d1f', accent = '#e4572e', family = 'Inter' } = {}) {
+export function chapter(g, label, p, { x = 64, y = 72, size = 26, color = '#1d1d1f', accent = '#e4572e', family = 'Inter' } = {}) {
+  const ctx = ctxOf(g);
   if (p <= 0) return;
   ctx.save();
   ctx.globalAlpha *= clamp(p * 3);
@@ -434,7 +499,8 @@ export function chapter(ctx, label, p, { x = 64, y = 72, size = 26, color = '#1d
   ctx.restore();
 }
 
-export function progressRing(ctx, p, { x, y, r = 16, color = '#e4572e', track = 'rgba(0,0,0,0.15)', width = 3, label = '', labelColor = '#1d1d1f', family = 'Inter' }) {
+export function progressRing(g, p, { x, y, r = 16, color = '#e4572e', track = 'rgba(0,0,0,0.15)', width = 3, label = '', labelColor = '#1d1d1f', family = 'Inter' }) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.lineWidth = width;
   ctx.strokeStyle = track;
@@ -452,8 +518,9 @@ export function progressRing(ctx, p, { x, y, r = 16, color = '#e4572e', track = 
  * Burned-in captions for the voice line playing at env.frame. Each line eases in
  * and out; speakers can have their own colour: { colors: { narrator: '#fff', dot: '#ffb347' } }.
  */
-export function captions(ctx, env, { size = 38, weight = 600, family = 'Inter', colors = {}, color = '#ffffff',
+export function captions(g, env, { size = 38, weight = 600, family = 'Inter', colors = {}, color = '#ffffff',
   box = 'rgba(0,0,0,0.55)', bottom = 90, maxWidth = 0.72, fade = 0.15 } = {}) {
+  const ctx = ctxOf(g);
   const { timeline } = env.project;
   const line = timeline.lines.find((l) => env.frame >= l.from && env.frame < l.from + l.durationInFrames);
   if (!line) return;
@@ -482,8 +549,9 @@ export function captions(ctx, env, { size = 38, weight = 600, family = 'Inter', 
 
 // ------------------------------------------------------------------ camera
 
-/** Look at (x, y) with zoom/rotation; everything drawn in fn() moves together. */
-export function camera(ctx, w, h, { x = w / 2, y = h / 2, zoom = 1, rotate = 0 } = {}, fn) {
+/** Look at (x, y) with zoom/rotation; everything drawn in fn(), p5 calls included, moves together. */
+export function camera(g, w, h, { x = w / 2, y = h / 2, zoom = 1, rotate = 0 } = {}, fn) {
+  const ctx = ctxOf(g);
   ctx.save();
   ctx.translate(w / 2, h / 2);
   ctx.scale(zoom, zoom);
@@ -494,28 +562,33 @@ export function camera(ctx, w, h, { x = w / 2, y = h / 2, zoom = 1, rotate = 0 }
 }
 
 /** Parallax layer: depth 0 = fixed to screen, 1 = moves with the camera. */
-export function parallax(ctx, w, h, cam, depth, fn) {
-  camera(ctx, w, h, { x: lerp(w / 2, cam.x ?? w / 2, depth), y: lerp(h / 2, cam.y ?? h / 2, depth),
+export function parallax(g, w, h, cam, depth, fn) {
+  camera(g, w, h, { x: lerp(w / 2, cam.x ?? w / 2, depth), y: lerp(h / 2, cam.y ?? h / 2, depth),
     zoom: lerp(1, cam.zoom ?? 1, depth), rotate: (cam.rotate ?? 0) * depth }, fn);
 }
 
 // ------------------------------------------------------------------ images
 
-export function imageCover(ctx, img, x, y, w, h, { focusX = 0.5, focusY = 0.5 } = {}) {
+// Images may be p5.Image / p5.Graphics (project images arrive as p5.Image) or plain canvas sources.
+const sourceOf = (img) => img.canvas ?? img;
+
+export function imageCover(g, img, x, y, w, h, { focusX = 0.5, focusY = 0.5 } = {}) {
+  const ctx = ctxOf(g);
   const s = Math.max(w / img.width, h / img.height);
   const iw = img.width * s, ih = img.height * s;
-  ctx.drawImage(img, x - (iw - w) * focusX, y - (ih - h) * focusY, iw, ih);
+  ctx.drawImage(sourceOf(img), x - (iw - w) * focusX, y - (ih - h) * focusY, iw, ih);
 }
 
 /** Paint an image in with soft brush dabs along a zig-zag path (p = 0..1). */
-export function brushReveal(ctx, img, x, y, w, h, p, { seed = 4, rows = 7, brush = 0.16 } = {}) {
+export function brushReveal(g, img, x, y, w, h, p, { seed = 4, rows = 7, brush = 0.16 } = {}) {
+  const ctx = ctxOf(g);
   if (p <= 0) return;
-  if (p >= 1) { ctx.drawImage(img, x, y, w, h); return; }
+  if (p >= 1) { ctx.drawImage(sourceOf(img), x, y, w, h); return; }
   const scale = currentScale(ctx);
   const layer = createLayer(w * scale, h * scale);
   const c = layer.getContext('2d');
   c.scale(scale, scale);
-  c.drawImage(img, 0, 0, w, h);
+  c.drawImage(sourceOf(img), 0, 0, w, h);
   c.globalCompositeOperation = 'destination-in';
   const r = rng(seed);
   const dabs = 220;
@@ -526,11 +599,11 @@ export function brushReveal(ctx, img, x, y, w, h, p, { seed = 4, rows = 7, brush
     const along = (q * rows) % 1;
     const px = (row % 2 ? 1 - along : along) * w + r.range(-0.04, 0.04) * w;
     const py = ((row + 0.5) / rows) * h + fbm(q * 9, 0, seed) * h * 0.05;
-    const g = c.createRadialGradient(px, py, 0, px, py, radius);
-    g.addColorStop(0, 'rgba(0,0,0,1)');
-    g.addColorStop(0.6, 'rgba(0,0,0,0.85)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    c.fillStyle = g;
+    const grad = c.createRadialGradient(px, py, 0, px, py, radius);
+    grad.addColorStop(0, 'rgba(0,0,0,1)');
+    grad.addColorStop(0.6, 'rgba(0,0,0,0.85)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = grad;
     c.fillRect(px - radius, py - radius, radius * 2, radius * 2);
   }
   ctx.save();
@@ -560,8 +633,9 @@ export function talk(t, speaking, seed = 2) {
  * A friendly blob character. Idle breathing, squash & stretch, blinking, eye
  * direction, talking mouth, blush, and hand-drawn outline boil are built in.
  */
-export function mascot(ctx, { x, y, size = 180, t = 0, body = '#fffaf0', outline = '#1d1d1f', cheek = '#ff9a8b',
+export function mascot(g, { x, y, size = 180, t = 0, body = '#fffaf0', outline = '#1d1d1f', cheek = '#ff9a8b',
   look = [0, 0], mood = 'happy', mouth = 0, seed = 1, squash = 0, wave = 0, boil = 8 } = {}) {
+  const ctx = ctxOf(g);
   const breathe = Math.sin(t * TAU * 0.35) * 0.018;
   const sy = 1 + breathe - squash * 0.12, sx = 1 - breathe * 0.6 + squash * 0.1;
   const bob = Math.sin(t * TAU * 0.35 + 0.6) * size * 0.012;

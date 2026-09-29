@@ -101,4 +101,4 @@ Cue fields in `storyboard.json`: `type`, `at` (`transition_out`, `transition_in`
 - Speech is levelled to -20 dBFS RMS per line; music sits 8 dB under speech and ducks a further 9 dB while anyone speaks (0.25 s attack, 0.5 s release); SFX use their cue gain (defaults per type).
 - The sum is mastered to **-14 LUFS integrated, -1.5 dBTP** (web/social). Use `--lufs -16` for podcasts/Apple, `--lufs -23` for broadcast.
 - Rebalance: `--music-db` (default -8 with voice, 0 without), `--duck-db`, `--sfx-db`, `--vo-db`; `--stems` writes `stem-vo/music/sfx.wav` for inspection.
-- The renderer muxes `public/audio/mix.wav` into `out/final.mp4` as AAC 320 kb/s, and QC re-measures loudness independently with ffmpeg's `ebur128`.
+- The renderer muxes `public/audio/mix.wav` into `out/final.mp4` as AAC 320 kb/s.

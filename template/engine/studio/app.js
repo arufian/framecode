@@ -1,5 +1,6 @@
-// Studio client: draws the project live with the same engine the renderer uses.
+// Studio client: draws the project live with the same engine and p5 code the renderer uses.
 import { setPlatform, loadProject, renderFrame, sceneAt, clamp } from '/engine/core.js';
+import { browserPlatform } from '/engine/platform-browser.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view'), vctx = view.getContext('2d');
@@ -10,28 +11,6 @@ const state = {
   project: null, timeline: null, frame: saved.frame || 0, playing: false, loop: !!saved.loop, muted: !!saved.muted,
   safe: !!saved.safe, speed: saved.speed || 1, zoom: saved.zoom || 'fit', scale: 1, dirty: true,
   clockStart: 0, clockFrame: 0, audio: null, audioOk: false, notes: [], drawTimes: [], cache: {},
-};
-
-const platform = {
-  createCanvas: (w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h }),
-  loaders: {
-    loadJSON: async (p) => {
-      const res = await fetch(`/${p}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
-      return res.json();
-    },
-    loadImage: (p) => new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error(`image failed to load: ${p}`));
-      img.src = `/${p}`;
-    }),
-    loadFont: async ({ family, src, weight = 400, style = 'normal' }) => {
-      const face = new FontFace(family, `url(/${src})`, { weight: String(weight), style });
-      await face.load();
-      document.fonts.add(face);
-    },
-  },
 };
 
 // ------------------------------------------------------------------ helpers
@@ -337,6 +316,7 @@ events.addEventListener('reload', () => { persist(); location.reload(); });
 
 (async () => {
   try {
+    const platform = await browserPlatform();
     setPlatform(platform);
     const module = await import(`/project.js?v=${Date.now()}`);
     state.project = await loadProject(module.default, platform.loaders);

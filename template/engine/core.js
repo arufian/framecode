@@ -1,7 +1,8 @@
-// Core of the animation engine: time math, easing, springs, noise, and frame
-// compositing. Pure ES module, shared by the browser studio and the Node renderer.
-// Every function takes time as a (possibly fractional) frame number, so the same
-// code renders studio previews, final frames, and motion-blur sub-frames.
+// Core of the animation engine: time math, easing, springs, noise, frame
+// compositing, and the p5.js surface scenes draw with. Pure ES module, shared by
+// the browser studio and the headless-Chrome renderer. Every function takes time
+// as a (possibly fractional) frame number, so the same code renders studio
+// previews, final frames, and motion-blur sub-frames.
 
 import { TRANSITIONS } from './transitions.js';
 
@@ -203,14 +204,71 @@ export function sceneAt(timeline, frame) {
   return active[active.length - 1] || timeline.scenes[timeline.scenes.length - 1];
 }
 
+// ------------------------------------------------------------------ p5 surface
+
+/**
+ * The offscreen p5 instance every scene, background, and overlay draws with. It is
+ * created once; the engine drives it frame by frame (p5's own draw loop never runs).
+ */
+async function createSurface(w, h) {
+  const { p5, container } = getPlatform();
+  if (!p5) throw new Error('engine platform has no p5 constructor');
+  const surface = { p: null, density: 0, now: 0 };
+  surface.p = await new Promise((resolve, reject) => {
+    new p5((p) => {
+      p.setup = () => {
+        try {
+          p.createCanvas(w, h);
+          p.noLoop();
+          p.millis = () => surface.now; // the caller's clock, never wall-clock time
+          resolve(p);
+        } catch (error) {
+          reject(error);
+        }
+      };
+    }, container);
+  });
+  return surface;
+}
+
+/**
+ * Run fn(p) on the p5 surface and composite the result onto ctx (design pixels).
+ * Before each call the surface matches the output scale, is cleared, reseeds
+ * random()/noise() from clock.seed, and maps frameCount/millis()/deltaTime to the
+ * clock, so p5 code is deterministic, seek-safe, and identical across workers.
+ */
+function paint(ctx, project, scale, clock, fn) {
+  const surface = project.surface;
+  const { p } = surface;
+  if (surface.density !== scale) { p.pixelDensity(scale); surface.density = scale; }
+  const seed = hashString(String(clock.seed));
+  p.randomSeed(seed);
+  p.noiseSeed(seed);
+  p.angleMode(p.RADIANS);
+  p.frameCount = Math.floor(clock.frame);
+  p.deltaTime = 1000 / clock.fps;
+  surface.now = (clock.frame / clock.fps) * 1000;
+  p.clear();
+  const renderer = p._renderer;
+  const depth = renderer._pushPopDepth;
+  p.push();
+  try {
+    fn(p);
+  } finally {
+    // One pop for our push, plus any the caller forgot, so no state leaks into the next draw.
+    if (typeof depth === 'number') while (renderer._pushPopDepth > depth) p.pop();
+    else p.pop();
+  }
+  ctx.drawImage(p.canvas, 0, 0, p.width, p.height);
+}
+
 // ------------------------------------------------------------------ rendering
 
-function drawScene(ctx, project, scene, frame) {
+function drawScene(ctx, project, scene, frame, scale) {
   const module = project.scenes[scene.component];
   if (!module) throw new Error(`scene component "${scene.component}" (scene ${scene.id}) is not registered in project.js`);
-  ctx.save();
-  module.draw(ctx, sceneContext(project, scene, frame));
-  ctx.restore();
+  const s = sceneContext(project, scene, frame);
+  paint(ctx, project, scale, { seed: scene.id, frame: s.frame, fps: s.fps }, (p) => module.draw(p, s));
 }
 
 /**
@@ -227,11 +285,12 @@ export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
   ctx.clearRect(0, 0, timeline.width, timeline.height);
   ctx.fillStyle = project.backgroundColor || '#000000'; // video has no alpha: studio and render agree
   ctx.fillRect(0, 0, timeline.width, timeline.height);
-  if (project.background) { ctx.save(); project.background(ctx, env); ctx.restore(); }
+  const clock = { frame, fps: timeline.fps };
+  if (project.background) paint(ctx, project, scale, { ...clock, seed: 'background' }, (p) => project.background(p, env));
 
   const active = activeScenes(timeline, frame);
   if (active.length === 1 || active.length > 2) {
-    drawScene(ctx, project, active[active.length - 1], frame);
+    drawScene(ctx, project, active[active.length - 1], frame, scale);
   } else if (active.length === 2) {
     const [a, b] = active;
     const spec = a.transitionOut;
@@ -247,8 +306,8 @@ export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
       return { layer, lctx };
     };
     const A = layerFor('__a'), B = layerFor('__b');
-    drawScene(A.lctx, project, a, frame);
-    drawScene(B.lctx, project, b, frame);
+    drawScene(A.lctx, project, a, frame, scale);
+    drawScene(B.lctx, project, b, frame, scale);
     const transition = TRANSITIONS[spec.type] || TRANSITIONS.fade;
     const params = spec.params || {};
     const p = easeByName(params.ease || transition.ease || 'inOutCubic')(raw);
@@ -257,7 +316,7 @@ export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
     transition.draw(ctx, A.layer, B.layer, p, params, { ...env, W, H, raw, cache });
     ctx.restore();
   }
-  if (project.overlay) { ctx.save(); project.overlay(ctx, env); ctx.restore(); }
+  if (project.overlay) paint(ctx, project, scale, { ...clock, seed: 'overlay' }, (p) => project.overlay(p, env));
   ctx.restore();
 }
 
@@ -266,6 +325,7 @@ export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
 export async function loadProject(project, { loadJSON, loadImage, loadFont }, timelinePath = 'src/timeline.json') {
   project.timeline = await loadJSON(timelinePath);
   for (const font of project.fonts) await loadFont(font);
+  project.surface = await createSurface(project.timeline.width, project.timeline.height);
   project.assets = { images: {} };
   for (const [name, src] of Object.entries(project.images)) project.assets.images[name] = await loadImage(src);
   const missing = project.timeline.scenes.filter((s) => !project.scenes[s.component]).map((s) => `${s.id}:${s.component}`);

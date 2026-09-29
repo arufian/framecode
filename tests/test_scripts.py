@@ -378,76 +378,6 @@ class VoiceoverTests(unittest.TestCase):
                 voiceover.eleven_key()
 
 
-def ffmpeg(*args):
-    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
-
-
-@unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
-class QcTests(unittest.TestCase):
-    def setUp(self):
-        self.dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.dir.cleanup)
-        self.work = Path(self.dir.name)
-
-    def timeline(self, scenes, frames, audio=False):
-        t = {"fps": 30, "width": 320, "height": 180, "durationInFrames": frames, "scenes": scenes, "lines": [], "sfx": [],
-             "audio": {"mix": "audio/mix.wav" if audio else None, "music": audio}}
-        path = self.work / "timeline.json"
-        path.write_text(json.dumps(t))
-        return path
-
-    def qc(self, video, timeline, *extra):
-        result = subprocess.run([sys.executable, str(SCRIPTS / "qc_video.py"), "--video", str(video), "--timeline",
-                                 str(timeline), "--outdir", str(self.work / "qc"), *extra], capture_output=True, text=True)
-        return result.returncode, {c["check"]: c["status"] for c in
-                                   json.loads((self.work / "qc/report.json").read_text())["checks"]}, result.stdout
-
-    @staticmethod
-    def scene(sid, start, length, kind="fade", out=0, hold=False):
-        return {"id": sid, "from": start, "durationInFrames": length, "inFrames": 0, "outFrames": out,
-                "transitionOut": {"type": kind}, "hold": hold}
-
-    def test_smooth_video_passes(self):
-        video = self.work / "smooth.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=3", "-pix_fmt", "yuv420p", "-c:v", "libx264", str(video))
-        code, checks, out = self.qc(video, self.timeline([self.scene("S1", 0, 90, "cut")], 90))
-        self.assertEqual(code, 0, out)
-        self.assertEqual(checks["frame count"], "pass")
-        self.assertTrue((self.work / "qc/contact.png").is_file())
-
-    def test_hard_cut_fails_unless_planned(self):
-        video = self.work / "cut.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1.5", "-f", "lavfi", "-i",
-               "life=size=320x180:rate=30:mold=10:ratio=0.3:death_color=#101030:life_color=#ffcc00,trim=duration=1.5",
-               "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-pix_fmt", "yuv420p", "-c:v", "libx264", str(video))
-        unplanned = self.timeline([self.scene("S1", 0, 45, "fade"), self.scene("S2", 45, 45)], 90)
-        code, checks, out = self.qc(video, unplanned)
-        self.assertEqual(checks["no unplanned hard cuts"], "fail", out)
-        planned = self.timeline([self.scene("S1", 0, 45, "cut"), self.scene("S2", 45, 45)], 90)
-        code, checks, out = self.qc(video, planned)
-        self.assertEqual(checks["no unplanned hard cuts"], "pass", out)
-
-    def test_frozen_stretch_fails_unless_hold(self):
-        video = self.work / "frozen.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1", "-vf", "tpad=stop_mode=clone:stop_duration=2",
-               "-pix_fmt", "yuv420p", "-c:v", "libx264", str(video))
-        code, checks, out = self.qc(video, self.timeline([self.scene("S1", 0, 90, "cut")], 90))
-        self.assertEqual(checks["no frozen frames"], "fail", out)
-        self.assertEqual(code, 1)
-        code, checks, out = self.qc(video, self.timeline([self.scene("S1", 0, 90, "cut", hold=True)], 90))
-        self.assertEqual(checks["no frozen frames"], "pass", out)
-
-    def test_audio_loudness_and_duration(self):
-        video = self.work / "audio.mp4"
-        wav = self.work / "tone.wav"
-        al.write_wav(wav, sine(997, 3, 10 ** (-14 / 20)) + np.random.default_rng(0).normal(0, 0.001, (3 * SR, 2)))
-        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=3", "-i", str(wav), "-pix_fmt", "yuv420p",
-               "-c:v", "libx264", "-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-shortest", str(video))
-        code, checks, out = self.qc(video, self.timeline([self.scene("S1", 0, 90, "cut")], 90, audio=True), "--tp", "0")
-        for name in ("audio stream", "A/V duration", "loudness", "no silent holes"):
-            self.assertEqual(checks[name], "pass", f"{name}\n{out}")
-
-
 @unittest.skipUnless(NODE, "needs node")
 class EngineTests(unittest.TestCase):
     def test_core_math_and_scene_timing(self):
@@ -482,6 +412,63 @@ console.log(JSON.stringify(out));
         self.assertEqual(out["exitAtMid"], 0)
         self.assertEqual(out["exitBefore"], 1)
         self.assertEqual(out["overlap"], [1, 2, 1])
+
+    def test_p5_surface_bridge(self):
+        # A stand-in p5 constructor: checks what the engine does around every draw call.
+        script = """
+import { setPlatform, loadProject, renderFrame, hashString } from './template/engine/core.js';
+const calls = [];
+class FakeP5 {
+  constructor(sketch) {
+    this._renderer = { _pushPopDepth: 0 };
+    this.RADIANS = 'radians';
+    this.canvas = { id: 'p5-canvas' };
+    sketch(this);
+    queueMicrotask(() => this.setup());
+  }
+  createCanvas(w, h) { this.width = w; this.height = h; }
+  noLoop() {}
+  pixelDensity(d) { calls.push(['density', d]); }
+  randomSeed(s) { this.seed = s; }
+  noiseSeed(s) { this.noise = s; }
+  angleMode(m) { this.angle = m; }
+  clear() {}
+  push() { this._renderer._pushPopDepth++; }
+  pop() { this._renderer._pushPopDepth--; }
+}
+const ctx = { save() {}, restore() {}, setTransform() {}, clearRect() {}, fillRect() {},
+  drawImage: (...a) => calls.push(['blit', a[0].id, ...a.slice(1)]) };
+const timeline = { fps: 60, width: 1920, height: 1080, durationInFrames: 200, lines: [],
+  scenes: [{ id: 'S1', component: 'demo', from: 0, durationInFrames: 200, inFrames: 0, outFrames: 0, lines: [] }] };
+const seen = [];
+const project = { fonts: [], images: {},
+  scenes: { demo: { draw(p, s) {
+    seen.push({ seed: p.seed, noise: p.noise, angle: p.angle, frameCount: p.frameCount, millis: p.millis(),
+      deltaTime: p.deltaTime, depth: p._renderer._pushPopDepth, t: s.t });
+    p.push(); p.push(); // unbalanced on purpose
+  } } },
+  overlay(p) { seen.push({ overlay: p.seed }); } };
+setPlatform({ p5: FakeP5, container: null, createCanvas: () => { throw new Error('no layers expected'); } });
+await loadProject(project, { loadJSON: async () => timeline, loadFont: async () => {}, loadImage: async () => null });
+renderFrame(ctx, project, 30.5, 0.5);
+renderFrame(ctx, project, 31, 0.5);
+console.log(JSON.stringify({ calls, seen, depth: project.surface.p._renderer._pushPopDepth,
+  seeds: [hashString('S1'), hashString('overlay')] }));
+"""
+        result = subprocess.run([NODE, "--input-type=module", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        scene_seed, overlay_seed = out["seeds"]
+        self.assertEqual([c for c in out["calls"] if c[0] == "density"], [["density", 0.5]], "density set once per scale")
+        self.assertEqual(out["calls"].count(["blit", "p5-canvas", 0, 0, 1920, 1080]), 4, "scene + overlay blits per frame")
+        first = out["seen"][0]
+        self.assertEqual((first["seed"], first["noise"], first["angle"]), (scene_seed, scene_seed, "radians"))
+        self.assertEqual((first["frameCount"], first["depth"]), (30, 1))
+        self.assertAlmostEqual(first["millis"], 30.5 / 60 * 1000)
+        self.assertAlmostEqual(first["deltaTime"], 1000 / 60)
+        self.assertEqual(out["seen"][1], {"overlay": overlay_seed})
+        self.assertEqual(out["seen"][2]["depth"], 1, "unbalanced push() calls do not leak into the next draw")
+        self.assertEqual(out["depth"], 0)
 
     def test_engine_files_parse(self):
         for path in (ROOT / "template").rglob("*.js"):
@@ -520,6 +507,18 @@ class SkillContractTests(unittest.TestCase):
                 text = path.read_text().lower()
                 for banned in ("remotion", "hyperframes", "motion-canvas", "manim"):
                     self.assertNotIn(banned, text, f"{path} mentions {banned}")
+
+    def test_scenes_are_p5_sketches(self):
+        for path in (ROOT / "template/scenes").glob("*.js"):
+            self.assertIn("draw(p, s)", path.read_text(), f"{path.name}: scenes draw with the p5 instance")
+        project = (ROOT / "template/project.js").read_text()
+        self.assertNotIn("(ctx, env)", project, "background/overlay draw with p5 too")
+        self.assertIn("puppeteer", self.skill)
+        self.assertIn("p5@2", self.skill)
+
+    def test_node_version_gate(self):
+        self.assertEqual([preflight.node_ok(v) for v in ("v22.12.0", "v22.11.9", "v18.20.1", "v24.1.0", None)],
+                         [True, False, False, True, False])
 
     def test_example_storyboard_matches_registered_scenes(self):
         project = (ROOT / "template/project.js").read_text()

@@ -1,8 +1,8 @@
 // Project definition: fonts, images, scene registry, and the persistent layers
 // drawn under (background) and over (overlay) every scene. Scene keys must match
-// the `component` names in storyboard.json.
+// the `component` names in storyboard.json. background/overlay draw with p5 like scenes.
 import { defineProject, clamp } from './engine/core.js';
-import { grain, captions, progressRing } from './engine/draw.js';
+import { grain, captions, progressRing, opacity } from './engine/draw.js';
 import { THEME } from './theme.js';
 import title from './scenes/title.js';
 import explainer from './scenes/explainer.js';
@@ -23,14 +23,14 @@ export default defineProject({
   },
   scenes: { title, explainer, outro },
 
-  overlay(ctx, env) {
+  overlay(p, env) {
     const { timeline } = env.project;
     const progress = env.frame / (timeline.durationInFrames - 1);
-    const fadeIn = clamp(env.t / 0.6);
-    ctx.globalAlpha = fadeIn;
-    progressRing(ctx, progress, { x: env.w - 78, y: 72, r: 15, color: THEME.accent, track: 'rgba(128,128,128,0.35)' });
-    ctx.globalAlpha = 1;
-    if (timeline.captions) captions(ctx, env, { family: THEME.font, box: 'rgba(20,20,24,0.62)', colors: { narrator: '#ffffff' } });
-    grain(ctx, env.w, env.h, env.frame, { amount: 0.045 });
+    p.push();
+    opacity(p, clamp(env.t / 0.6));
+    progressRing(p, progress, { x: env.w - 78, y: 72, r: 15, color: THEME.accent, track: 'rgba(128,128,128,0.35)' });
+    p.pop();
+    if (timeline.captions) captions(p, env, { family: THEME.font, box: 'rgba(20,20,24,0.62)', colors: { narrator: '#ffffff' } });
+    grain(p, env.w, env.h, env.frame, { amount: 0.045 });
   },
 });

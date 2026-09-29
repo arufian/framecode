@@ -105,7 +105,7 @@ def build(board, durations, estimate=False):
         record = {"id": scene["id"], "component": scene.get("component", scene["id"]),
                   "from": start, "durationInFrames": frames, "inFrames": t_in, "outFrames": t_out,
                   "transitionOut": trans, "params": scene.get("params", {}),
-                  "hold": bool(scene.get("hold", False)), "lines": [l["id"] for l in scene_lines]}
+                  "lines": [l["id"] for l in scene_lines]}
         scenes.append(record)
         for line in scene_lines:
             lines.append({**line, "from": start + line["sceneFrom"]})

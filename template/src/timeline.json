@@ -32,7 +32,6 @@
         "chapter": "01 · hello",
         "title": "Every frame, drawn in code."
       },
-      "hold": false,
       "lines": [
         "S1-01"
       ]
@@ -59,7 +58,6 @@
           "Frames"
         ]
       },
-      "hold": false,
       "lines": [
         "S2-01"
       ]
@@ -81,7 +79,6 @@
         "title": "Your turn.",
         "subtitle": "Describe a video. Watch it get made."
       },
-      "hold": false,
       "lines": [
         "S3-01"
       ]
