@@ -6,6 +6,7 @@
 // design pixels; cached textures are rebuilt automatically at the current scale.
 
 import { clamp, lerp, EASE, rng, fbm, noise2, createLayer, TAU } from './core.js';
+import { frameAt } from './media.js';
 
 /** The 2D context behind a p5 instance or p5.Graphics (a raw context passes through). */
 export const ctxOf = (g) => g.drawingContext ?? g;
@@ -577,6 +578,29 @@ export function imageCover(g, img, x, y, w, h, { focusX = 0.5, focusY = 0.5 } = 
   const s = Math.max(w / img.width, h / img.height);
   const iw = img.width * s, ih = img.height * s;
   ctx.drawImage(sourceOf(img), x - (iw - w) * focusX, y - (ih - h) * focusY, iw, ih);
+}
+
+/**
+ * Draw a footage clip (s.assets.footage.<name>) at clip time `from + t * rate` seconds into
+ * the box. fit: 'cover' (fills and crops to the box), 'contain', or 'fill'. The clip holds
+ * its last frame unless loop. Returns false while no frame is loaded yet (studio only).
+ */
+export function footage(g, clip, t, x, y, w, h, { rate = 1, from = 0, loop = false, fit = 'cover', focusX = 0.5, focusY = 0.5 } = {}) {
+  if (!clip) throw new Error('footage: unknown clip; names come from public/media.json (run media.py visuals)');
+  const img = frameAt(clip, t, { rate, from, loop });
+  if (!img) return false;
+  const ctx = ctxOf(g);
+  ctx.save();
+  if (fit === 'fill') {
+    ctx.drawImage(img, x, y, w, h);
+  } else {
+    const s = fit === 'contain' ? Math.min(w / clip.width, h / clip.height) : Math.max(w / clip.width, h / clip.height);
+    const iw = clip.width * s, ih = clip.height * s;
+    if (fit === 'cover') { ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); }
+    ctx.drawImage(img, x + (w - iw) * focusX, y + (h - ih) * focusY, iw, ih);
+  }
+  ctx.restore();
+  return true;
 }
 
 /** Paint an image in with soft brush dabs along a zig-zag path (p = 0..1). */

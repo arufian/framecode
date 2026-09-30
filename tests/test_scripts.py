@@ -26,7 +26,9 @@ sys.path.insert(0, str(SCRIPTS))
 import audio_lib as al  # noqa: E402
 import gen_music  # noqa: E402
 import gen_sfx  # noqa: E402
+import media  # noqa: E402
 import mix_audio  # noqa: E402
+import mixkit  # noqa: E402
 import preflight  # noqa: E402
 import timeline as tl  # noqa: E402
 import voiceover  # noqa: E402
@@ -182,6 +184,195 @@ class TimelineTests(unittest.TestCase):
         self.assertAlmostEqual(sections[-1]["end"], t["durationInFrames"] / 60, places=3)
         for a, b in zip(sections, sections[1:]):
             self.assertAlmostEqual(a["end"], b["start"], places=3)
+
+
+def click_track(bpm, seconds, first=0.25, accent=4):
+    """Kick-like clicks on every beat (louder on the bar) over a quiet bed, mono at SR."""
+    y = np.zeros(int(seconds * SR), dtype=np.float32)
+    period = 60.0 / bpm
+    burst = np.sin(2 * np.pi * 70 * np.arange(int(0.08 * SR)) / SR) * np.exp(-np.arange(int(0.08 * SR)) / (0.02 * SR))
+    for k, t in enumerate(np.arange(first, seconds - 0.1, period)):
+        i = int(t * SR)
+        y[i:i + len(burst)] += (0.9 if k % accent == 0 else 0.5) * burst[: len(y) - i]
+    return y
+
+
+def ledger_board(**music):
+    b = board()
+    b["audio"]["music"] = {"source": "mixkit", "track": "music", **music}
+    return b
+
+
+LEDGER = [{"name": "music", "kind": "music", "file": "src/track.wav",
+           "measured": {"bpm": 120.0, "period": 0.5, "firstBeat": 0.25, "firstDownbeat": 0.25, "drop": 30.25,
+                        "seconds": 90.0}}]
+
+
+class LedgerTimelineTests(unittest.TestCase):
+    def test_ledger_track_sets_the_grid_and_starts_on_a_beat(self):
+        t = tl.build(ledger_board(start=10.1), DURATIONS, ledger=LEDGER)
+        self.assertEqual(t["bpm"], 120.0)
+        self.assertAlmostEqual(t["music"]["start"], 10.25)  # nearest beat of the track
+        beat = 60 * 60 / 120
+        for scene in t["scenes"][:-1]:
+            mid = scene["from"] + scene["durationInFrames"] - scene["outFrames"] / 2
+            self.assertAlmostEqual(mid % beat, 0.0, places=6)
+
+    def test_drop_lands_on_the_scene(self):
+        t = tl.build(ledger_board(drop_at="S2"), DURATIONS, ledger=LEDGER)
+        s2 = next(s for s in t["scenes"] if s["id"] == "S2")
+        at = (s2["from"] + s2["inFrames"] / 2) / 60
+        self.assertAlmostEqual(t["music"]["start"] + at, 30.25, places=3)
+        self.assertAlmostEqual(t["music"]["drop"], at, places=3)
+
+    def test_drop_too_early_and_unmeasured_tracks_fail(self):
+        early = [{**LEDGER[0], "measured": {**LEDGER[0]["measured"], "drop": 1.0}}]
+        with self.assertRaises(SystemExit):
+            tl.build(ledger_board(drop_at="S3"), DURATIONS, ledger=early)
+        with self.assertRaises(SystemExit):
+            tl.build(ledger_board(), DURATIONS, ledger=[{"name": "music", "kind": "music", "file": "x"}])
+        with self.assertRaises(SystemExit):
+            tl.build(ledger_board(), DURATIONS, ledger=None)
+
+    def test_hand_set_bpm_overrides_the_measurement(self):
+        ledger = [{**LEDGER[0], "bpm": 100.0}]
+        self.assertAlmostEqual(tl.build(ledger_board(), DURATIONS, ledger=ledger)["bpm"], 100.0)
+
+    def test_generated_music_keeps_its_bpm(self):
+        t = tl.build(board(), DURATIONS)
+        self.assertEqual(t["music"]["source"], "generated")
+        self.assertEqual(t["bpm"], 90.0)
+
+
+class MediaTests(unittest.TestCase):
+    def test_tempo_and_downbeat_of_a_click_track(self):
+        y = media.al.resample(click_track(120, 40.0), SR, media.ASR)[:, 0]
+        m = media.measure_music(y, media.ASR, hint=(100, 140))
+        self.assertAlmostEqual(m["bpm"], 120.0, delta=0.2)
+        offset = (m["firstBeat"] - 0.25) % 0.5
+        self.assertLess(min(offset, 0.5 - offset), 0.02, "beat grid sits on the clicks")
+
+    def test_sfx_hit_and_peak(self):
+        x = np.zeros((SR, 2), dtype=np.float32)
+        x[int(0.2 * SR):int(0.21 * SR)] = 0.8                                    # click at 200 ms
+        swell = np.sin(np.linspace(0, np.pi, int(0.6 * SR))) ** 4
+        y = np.zeros((SR, 2), dtype=np.float32)
+        y[int(0.1 * SR):int(0.7 * SR)] = (swell * 0.7)[:, None]                  # whoosh peaking at 400 ms
+        self.assertAlmostEqual(media.measure_sfx(x)["hitMs"], 200, delta=12)
+        self.assertAlmostEqual(media.measure_sfx(y)["peakMs"], 400, delta=15)
+        self.assertEqual(media.sync_mode({"name": "whoosh-soft"}), "peak")
+        self.assertEqual(media.sync_mode({"name": "pop"}), "hit")
+        self.assertEqual(media.sfx_gain({"name": "ui-click"}), -16)
+        self.assertEqual(media.sfx_gain({"name": "pop", "gainDb": -3}), -3)
+
+    def test_sfx_placement_uses_the_sync_point(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "media/src").mkdir(parents=True)
+            x = np.zeros((SR // 2, 2), dtype=np.float32)
+            x[int(0.25 * SR):int(0.26 * SR)] = 0.5
+            al.write_wav(root / "media/src/pop.wav", x)
+            ledger = [{"name": "pop", "kind": "sfx", "file": "src/pop.wav", "measured": media.measure_sfx(x)}]
+            al.save_json(root / "media/sources.json", ledger)
+            timeline = {"fps": 60, "sfx": [{"id": "sfx-01", "type": "pop", "syncFrame": 120, "gainDb": None}]}
+            media.place_sfx(timeline, root / "media", root / "public")
+            cue = timeline["sfx"][0]
+            self.assertEqual(cue["from"], 120 - 15)
+            self.assertEqual(cue["gainDb"], -12)
+            self.assertTrue((root / "public" / cue["src"]).is_file())
+            timeline["sfx"].append({"id": "sfx-02", "type": "whoosh", "syncFrame": 10})
+            with self.assertRaises(SystemExit):
+                media.place_sfx(timeline, root / "media", root / "public")
+
+    def test_music_bed_trims_loops_and_fades(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "media/src").mkdir(parents=True)
+            track = np.repeat(click_track(120, 20.0)[:, None], 2, axis=1) + sine(220, 20.0, 0.1)
+            al.write_wav(root / "media/src/track.wav", track)
+            al.save_json(root / "media/sources.json", LEDGER)
+            timeline = {"fps": 60, "durationInFrames": 60 * 30,
+                        "music": {"source": "mixkit", "track": "music", "start": 2.25, "fadeOut": 2.0, "src": "music/music.wav"}}
+            info = media.build_music(timeline, root / "media", root / "public")
+            self.assertTrue(info["looped"])
+            bed = al.read_audio(root / "public/music/music.wav")
+            self.assertEqual(len(bed), 30 * SR)
+            self.assertLess(al.rms_db(bed[-int(0.1 * SR):], gate_db=-120), al.rms_db(bed) - 12)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
+    def test_visuals_extract_frames_and_images(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "media/src").mkdir(parents=True)
+            clip, art = root / "media/src/clip.mp4", root / "media/src/art.png"
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=25:duration=3",
+                            "-pix_fmt", "yuv420p", str(clip)], check=True)
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:size=5000x2000",
+                            "-frames:v", "1", str(art)], check=True)
+            ledger = [{"name": "clip", "kind": "video", "file": "src/clip.mp4", "in": 1.0, "out": 2.0},
+                      {"name": "art", "kind": "art", "file": "src/art.png"}]
+            for e in ledger:
+                e["measured"] = media.ffprobe(root / "media" / e["file"])
+            al.save_json(root / "media/sources.json", ledger)
+            board_file = root / "storyboard.json"
+            al.save_json(board_file, board())
+            args = type("A", (), {"storyboard": board_file, "media": root / "media", "public": root / "public"})
+            media.cmd_visuals(args)
+            manifest = al.load_json(root / "public/media.json")
+            meta = manifest["footage"]["clip"]
+            self.assertEqual((meta["width"], meta["height"], meta["fps"]), (1280, 720, 25.0))  # never upscaled
+            self.assertAlmostEqual(meta["frames"], 25, delta=1)
+            self.assertTrue((root / "public/footage/clip/00000.jpg").is_file())
+            self.assertEqual(media.ffprobe(root / manifest["images"]["art"])["width"], 3840)  # 2x design width
+
+
+LISTING_AUDIO = """<div data-test-id="audio-player" data-audio-player-item-id-value="644"
+ data-audio-player-item-type-value="music"><h2 class="item-grid-card__title"> Upbeat Jazz </h2>
+ <p class="item-grid-sound-player__preview__author">by Francisco Alvear</p>
+ <div data-test-id="duration">1:50</div><a class="meta-links__link" href="#">Jazz</a></div>"""
+LISTING_VIDEO = """<div class="item-grid-card item-grid-card--show-meta" data-algolia-analytics-object-id="video-51502">
+ <div data-item-grid--video-player-item-id-value="51502" data-item-grid--video-player-item-type-value="Video">
+ <a href="/free-stock-video/rocky-coast-51502/" class="item-grid-video-player__overlay-link"> Rocky coast </a></div>
+ <p class="item-grid-card__description">Waves on rocks.</p></div>"""
+LISTING_ART = """<a data-analytics-click-label="Woman watching fireworks" href="/free-stock-art/woman-watching-fireworks-175/"><img></a>"""
+
+
+class MixkitTests(unittest.TestCase):
+    def test_listings_parse(self):
+        music = mixkit.parse_listing(LISTING_AUDIO, "music", "u")[0]
+        self.assertEqual((music["id"], music["title"], music["author"], music["duration"], music["tags"]),
+                         ("644", "Upbeat Jazz", "Francisco Alvear", "1:50", ["Jazz"]))
+        video = mixkit.parse_listing(LISTING_VIDEO, "video", "u")[0]
+        self.assertEqual((video["id"], video["title"], video["description"]), ("51502", "Rocky coast", "Waves on rocks."))
+        self.assertTrue(video["page"].endswith("/free-stock-video/rocky-coast-51502/"))
+        art = mixkit.parse_listing(LISTING_ART, "art", "u")[0]
+        self.assertEqual((art["id"], art["title"]), ("175", "Woman watching fireworks"))
+
+    def test_asset_urls_fall_back(self):
+        self.assertEqual([u.rsplit("-", 1)[1] for u in mixkit.asset_urls("video", "7", 1080)], ["1080.mp4", "720.mp4", "360.mp4"])
+        self.assertTrue(mixkit.asset_urls("art", "7")[0].endswith("/7-original.png"))
+        self.assertTrue(mixkit.asset_urls("sfx", "7")[1].endswith("-preview.mp3"))
+
+    def test_review_page_lists_every_download(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            for name in ("644.mp3", "51502-1080.mp4", "175-original.png"):
+                (folder / name).write_bytes(b"x")
+            al.save_json(folder / "review.json", [
+                {"kind": "music", "id": "644", "label": "", "file": "644.mp3", "title": "Upbeat <Jazz>"},
+                {"kind": "video", "id": "51502", "label": "S2", "file": "51502-1080.mp4", "title": "Coast",
+                 "licenseId": "videoRestricted", "license": "Mixkit Stock Video Restricted License"},
+                {"kind": "art", "id": "175", "label": "S3", "file": "175-original.png", "title": "Fireworks"},
+                {"kind": "sfx", "id": "9", "label": "pop", "file": "gone.wav", "title": "missing file"}])
+            with contextlib.redirect_stdout(io.StringIO()):
+                mixkit.review(type("A", (), {"dir": folder, "out": None}))
+            page = (folder / "index.html").read_text()
+            self.assertIn("<audio controls preload=none src='644.mp3'>", page)
+            self.assertIn("src='51502-1080.mp4'", page)
+            self.assertIn("Restricted licence", page)
+            self.assertIn("Upbeat &lt;Jazz&gt;", page)
+            self.assertNotIn("gone.wav", page)
+            self.assertIn("#3", page)
 
 
 class MusicTests(unittest.TestCase):
@@ -470,6 +661,50 @@ console.log(JSON.stringify({ calls, seen, depth: project.surface.p._renderer._pu
         self.assertEqual(out["seen"][2]["depth"], 1, "unbalanced push() calls do not leak into the next draw")
         self.assertEqual(out["depth"], 0)
 
+    def test_footage_frames_are_exact_after_settling(self):
+        script = """
+import { createClip, setFootageLoader, frameAt, clipIndex, footageMisses, settleFootage, clearFootageMisses } from './template/engine/media.js';
+import { setPlatform, loadProject, renderFrameReady } from './template/engine/core.js';
+const loads = [];
+setFootageLoader(async (path) => { loads.push(path); return { path, close() {} }; });
+const clip = createClip('city', { dir: 'public/footage/city', frames: 50, fps: 25, width: 1920, height: 1080 });
+const out = {};
+out.index = [clipIndex(clip, 0), clipIndex(clip, 0.999), clipIndex(clip, 1.0), clipIndex(clip, 9), clipIndex(clip, 2.5, { loop: true }),
+             clipIndex(clip, 1, { from: 0.4, rate: 0.5 })];
+clearFootageMisses();
+out.first = frameAt(clip, 0.5);          // miss: nothing loaded yet
+out.misses = footageMisses();
+await settleFootage();
+out.after = frameAt(clip, 0.5)?.path;
+out.prefetched = loads.length > 1;
+// renderFrameReady redraws until the frame it draws is loaded
+class FakeP5 { constructor(sk) { this._renderer = { _pushPopDepth: 0 }; this.canvas = {}; sk(this); queueMicrotask(() => this.setup()); }
+  createCanvas() {} noLoop() {} pixelDensity() {} randomSeed() {} noiseSeed() {} angleMode() {} clear() {}
+  push() { this._renderer._pushPopDepth++; } pop() { this._renderer._pushPopDepth--; } }
+setPlatform({ p5: FakeP5 });
+const drawn = [];
+const timeline = { fps: 60, width: 1920, height: 1080, durationInFrames: 120, lines: [],
+  scenes: [{ id: 'S1', component: 'demo', from: 0, durationInFrames: 120, inFrames: 0, outFrames: 0, lines: [] }] };
+const media = { version: 1, images: {}, footage: { city: { dir: 'public/footage/city', frames: 50, fps: 25, width: 1920, height: 1080 } } };
+const project = { fonts: [], images: {}, scenes: { demo: { draw(p, s) { drawn.push(frameAt(s.assets.footage.city, s.t)?.path ?? null); } } } };
+await loadProject(project, { loadJSON: async (p) => p === 'public/media.json' ? media : timeline, loadFont: async () => {},
+  loadImage: async () => null, loadBitmap: async (path) => ({ path, close() {} }) });
+const ctx = { save() {}, restore() {}, setTransform() {}, clearRect() {}, fillRect() {}, drawImage() {} };
+await renderFrameReady(ctx, project, 90);
+out.drawn = drawn;
+console.log(JSON.stringify(out));
+"""
+        result = subprocess.run([NODE, "--input-type=module", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual(out["index"], [0, 24, 25, 49, 12, 22])
+        self.assertIsNone(out["first"])
+        self.assertEqual(out["misses"], 1)
+        self.assertEqual(out["after"], "public/footage/city/00012.jpg")
+        self.assertTrue(out["prefetched"])
+        self.assertEqual(out["drawn"][-1], "public/footage/city/00037.jpg")  # 1.5 s at 25 fps
+        self.assertIsNone(out["drawn"][0], "first pass misses, the final pass has the exact frame")
+
     def test_engine_files_parse(self):
         for path in (ROOT / "template").rglob("*.js"):
             if "node_modules" in path.parts:
@@ -491,9 +726,13 @@ class SkillContractTests(unittest.TestCase):
     def test_required_questions_and_gates_are_present(self):
         for phrase in ("Do you want a voice-over?", "ElevenLabs", "Kokoro", "Coqui", "Do you want background music?",
                        "Do you want sound effects?", "What styles or things do you NOT want in the video?",
+                       "Where should it come from?", "Mixkit — free recorded track", "Generated in code",
+                       "Local file", "AskUserQuestion", "mixkit.py review", "hard gate",
                        "Phase 8 — Studio review", "Phase 9 — Ask the output size"):
             self.assertIn(phrase, self.skill)
         self.assertLess(self.skill.index("Phase 8 — Studio review"), self.skill.index("Phase 10 — Render"))
+        self.assertLess(self.skill.index("mixkit.py review"), self.skill.index("Phase 4 — Scaffold"),
+                        "Mixkit downloads are reviewed before implementation")
 
     def test_referenced_files_exist(self):
         for name in set(re.findall(r"scripts/([\w]+\.py)", self.skill)):

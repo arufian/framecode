@@ -1,5 +1,6 @@
 // Studio client: draws the project live with the same engine and p5 code the renderer uses.
 import { setPlatform, loadProject, renderFrame, sceneAt, clamp } from '/engine/core.js';
+import { onFootageLoad } from '/engine/media.js';
 import { browserPlatform } from '/engine/platform-browser.js';
 
 const $ = (id) => document.getElementById(id);
@@ -319,6 +320,7 @@ events.addEventListener('reload', () => { persist(); location.reload(); });
     const platform = await browserPlatform();
     setPlatform(platform);
     const module = await import(`/project.js?v=${Date.now()}`);
+    onFootageLoad(() => { state.dirty = true; }); // a footage frame arrived: redraw with it
     state.project = await loadProject(module.default, platform.loaders);
     state.timeline = state.project.timeline;
     state.frame = clamp(state.frame, 0, total() - 1);

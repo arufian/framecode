@@ -7,7 +7,7 @@ The bar is set by four programmatic videos that agents drew entirely in code, on
 - **"One minute" (60 s)** — a pencil with a glowing tip draws a character and then a whole street in perspective lines, which turns into a neon rainy city; paper plane over sunset clouds; torn-paper reveals; a countdown timer HUD; subtitles colored per speaker. Dialogue, zero hard cuts.
 - **"The Water Cycle, a field study in 24 plates" (4.5 min)** — editorial infographic: serif titles, cream striped paper, textured illustrations, a HUD journal (elapsed time, altitude, temperature), plate counter, labels with leader lines, magnifier insets that open into a molecular micro-world, counters, and a closing summary. Music only.
 
-Common to all four: everything is drawn procedurally, every scene is an illustration (not a slide), motion never stops, and transitions happen inside the world.
+Common to all four: everything is drawn procedurally, every scene is an illustration (not a slide), motion never stops, and transitions happen inside the world. When the user chose Mixkit or local footage and art, the same bar applies: outside media is one layer of a composed, moving, graded scene with code-drawn type and graphics over it (`references/media.md` → "Footage and art in scenes"), never a raw clip with a caption.
 
 ## Principles
 

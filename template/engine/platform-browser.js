@@ -33,6 +33,12 @@ export async function browserPlatform() {
         img.onerror = () => reject(new Error(`image failed to load: ${p}`));
         img.src = `/${p}`;
       }),
+      // Footage frames: decoded off the main thread, drawn with drawImage.
+      loadBitmap: async (p) => {
+        const res = await fetch(`/${p}`);
+        if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
+        return createImageBitmap(await res.blob());
+      },
       loadFont: async ({ family, src, weight = 400, style = 'normal' }) => {
         const face = new FontFace(family, `url(/${src})`, { weight: String(weight), style });
         await face.load();

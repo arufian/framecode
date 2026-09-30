@@ -1,7 +1,7 @@
 // Render page: engine/render.js opens it in headless Chrome and drives it through
 // window.framecode. Frames are drawn by the same engine and p5 code as the studio,
 // then posted to the renderer as raw RGBA (video) or PNG (stills).
-import { setPlatform, loadProject, renderFrame } from '/engine/core.js';
+import { setPlatform, loadProject, renderFrameReady } from '/engine/core.js';
 import { browserPlatform } from '/engine/platform-browser.js';
 
 let project = null;
@@ -27,23 +27,25 @@ window.framecode = {
   },
 
   /** Draw each [frame, label] at design size; report the time or the error per frame. */
-  check(marks) {
+  async check(marks) {
     const { ctx } = target(project.timeline.width, project.timeline.height);
-    return marks.map(([frame, label]) => {
+    const results = [];
+    for (const [frame, label] of marks) {
       const t0 = performance.now();
       try {
-        renderFrame(ctx, project, frame, 1, cache);
-        return { frame, label, ms: performance.now() - t0 };
+        await renderFrameReady(ctx, project, frame, 1, cache);
+        results.push({ frame, label, ms: performance.now() - t0 });
       } catch (error) {
-        return { frame, label, error: String(error.stack || error).split('\n').slice(0, 3).join(' | ') };
+        results.push({ frame, label, error: String(error.stack || error).split('\n').slice(0, 3).join(' | ') });
       }
-    });
+    }
+    return results;
   },
 
   async stills({ marks, W, H, scale }) {
     const { canvas, ctx } = target(W, H);
     for (const [frame, name] of marks) {
-      renderFrame(ctx, project, frame, scale, cache);
+      await renderFrameReady(ctx, project, frame, scale, cache);
       const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
       await post(`/__still/${name}`, png);
     }
@@ -58,13 +60,13 @@ window.framecode = {
     for (let f = from; f < to; f++) {
       let data;
       if (samples <= 1) {
-        renderFrame(ctx, project, f, scale, cache);
+        await renderFrameReady(ctx, project, f, scale, cache);
         data = ctx.getImageData(0, 0, W, H).data;
       } else {
         acc.fill(0);
         for (let k = 0; k < samples; k++) {
           const offset = ((k + 0.5) / samples - 0.5) * 0.5; // 180-degree shutter centred on the frame
-          renderFrame(ctx, project, Math.max(0, f + offset), scale, cache);
+          await renderFrameReady(ctx, project, Math.max(0, f + offset), scale, cache);
           const d = ctx.getImageData(0, 0, W, H).data;
           for (let i = 0; i < d.length; i++) acc[i] += d[i];
         }

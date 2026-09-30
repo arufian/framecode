@@ -1,6 +1,6 @@
 ---
 name: framecode
-description: Produce a brand-new video end to end with a coding agent, with every frame, animation, music bed, and sound effect generated in code (no Remotion, HyperFrames, or other video frameworks; no stock media). Interviews the user (including voice-over via ElevenLabs, Kokoro, or Coqui TTS; generated music; generated sound effects; and a do-not list), writes a storyboard plan, confirms it, builds smooth animated scenes as p5.js sketches on a bundled engine, lets the user review everything in a live studio with notes, asks the output size, renders to MP4, and loops on fixes. Use when the user wants to create a video, explainer, animation, or motion graphic from scratch.
+description: Produce a brand-new video end to end with a coding agent. Scenes are p5.js sketches on a bundled engine (no Remotion, HyperFrames, or other video frameworks); music, sound effects, footage, and images come from free Mixkit resources (mixkit.co stock music, sound effects, stock video, stock art), are generated in code, or come from the user's local files, chosen per resource in the interview. Interviews the user (voice-over via ElevenLabs, Kokoro, or Coqui TTS; media sources; a do-not list), writes a storyboard plan, shortlists and measures Mixkit media for approval, builds smooth animated scenes that composite footage and art with code-drawn graphics, lets the user review everything in a live studio with notes, asks the output size, renders to MP4, and loops on fixes. Use when the user wants to create a video, explainer, animation, promo, or motion graphic from scratch.
 ---
 
 # Video Builder
@@ -9,13 +9,18 @@ Build a new video from user requirements through reviewed, verified delivery.
 
 This workflow is coding-agent agnostic. Use the host agent's available tools and obey its current mode, tool schemas, and permission rules.
 
-Workflow: interview → plan → confirm → scaffold → audio → build scenes → self-check → **studio review** → **ask render size** → render → fix loop → done.
+Workflow: interview → plan → **Mixkit download + user review** (when Mixkit is a source) → confirm → scaffold → audio and media → build scenes → self-check → **studio review** → **ask render size** → render → fix loop → done.
 
-Everything on screen and in the soundtrack is made by code the agent writes:
+Scenes are code; media has three possible sources, chosen by the user per resource (Phase 1, Round 2):
 
-- **Visuals**: scenes are p5.js sketches (p5 2.x) on the bundled engine (`template/engine/`), which owns the timeline, the clock, transitions, and compositing. The browser studio runs them live; the renderer runs the same page in headless Chrome (Puppeteer) and pipes frames to ffmpeg. p5.js is the only drawing library: do not use Remotion, HyperFrames, Motion Canvas, Manim, or any other video/animation framework (GSAP, three.js, anime.js), and do not use stock footage, stock images, or AI image generators. User-supplied assets (logo, photos, character art) are the only external visuals.
-- **Music and SFX**: synthesized by `scripts/gen_music.py` and `scripts/gen_sfx.py` (numpy oscillators and noise, royalty-free by construction).
+- **Scenes**: p5.js sketches (p5 2.x) on the bundled engine (`template/engine/`), which owns the timeline, the clock, transitions, and compositing. The browser studio runs them live; the renderer runs the same page in headless Chrome (Puppeteer) and pipes frames to ffmpeg. p5.js is the only drawing library: do not use Remotion, HyperFrames, Motion Canvas, Manim, or any other video/animation framework (GSAP, three.js, anime.js), and do not use AI image or video generators.
+- **Media sources**, one choice per resource (music, SFX, footage and images):
+  - **Mixkit** (free, recorded, real): stock music, sound effects, stock video, and stock art from mixkit.co, searched and downloaded with `scripts/mixkit.py`, measured and prepared with `scripts/media.py`. Footage and art are composited inside p5 scenes (graded, masked, layered with code-drawn type and graphics), never dropped in as raw full-screen clips with nothing drawn on top.
+  - **Generated in code**: music and SFX synthesized by `scripts/gen_music.py` and `scripts/gen_sfx.py` (numpy oscillators and noise, royalty-free by construction); visuals drawn procedurally in p5.
+  - **Local files**: the user's own licensed tracks, effects, footage, photos, and logos, registered with `media.py add`.
 - **Voice-over**: ElevenLabs (API), Kokoro (local), or Coqui (local), through `scripts/voiceover.py`.
+
+Every outside file goes through one ledger, `media/sources.json` (name, kind, file, page, licence, measurements), so the engine, the mixer, and `CREDITS.md` read the same list. Details: `references/media.md`.
 
 No architecture diagrams, flowcharts, sequence diagrams, or UI mockups are produced in this skill: the storyboard text, the studio, and rendered stills replace them.
 
@@ -51,29 +56,47 @@ Purpose and audience, where it will be published (YouTube, X, TikTok/Reels, webs
 
 Do NOT ask for the output resolution here — that question comes right before rendering (Phase 9). Design size is fixed by the aspect ratio (1920×1080, 1080×1920, 1080×1080, 1080×1350).
 
-### Round 2 — the four required questions (always ask all four, in one round when the tool allows)
+### Round 2 — the required questions: voice-over, media sources, exclusions (always ask all five)
+
+Ask these through the question tool (Claude Code: `AskUserQuestion`), never as a typed list in chat when the tool exists. Five questions: two calls in Claude Code (questions 1–4, then 5); follow the host's per-call limit elsewhere. Questions 2–4 ask **where each resource comes from**: free Mixkit resources, generated in code, or the user's local files.
 
 1. **Voice-over** — "Do you want a voice-over?"
    - `No voice-over`
    - `Yes — ElevenLabs` (needs your API key; most natural voices)
    - `Yes — Kokoro TTS` (free, runs locally, Apache-2.0, recommended local option)
    - `Yes — Coqui TTS` (free, runs locally)
-2. **Music** — "Do you want background music? It is composed and synthesized by code for this video (original, royalty-free)."
-   - `No music` · `Yes — calm / ambient` · `Yes — upbeat / corporate` · `Yes — cinematic` (free text: lo-fi, electronic)
-3. **Sound effects** — "Do you want sound effects? They are synthesized by code."
-   - `No sound effects` · `Yes — subtle (transitions only)` · `Yes — moderate (transitions + key reveals)` · `Yes — rich (UI clicks, pops, risers, impacts)`
-4. **Exclusions** — "What styles or things do you NOT want in the video?" (multi-select, free text encouraged)
+2. **Music source** — "Do you want background music? Where should it come from?"
+   - `Mixkit — free recorded track (Recommended)` (real music from mixkit.co; I shortlist and measure tracks, you listen and pick)
+   - `Generated in code` (original, synthesized for this video, works offline)
+   - `Local file — my own licensed track`
+   - `No music`
+3. **Sound-effect source** — "Do you want sound effects? Where should they come from?"
+   - `Mixkit — free recorded effects (Recommended)`
+   - `Generated in code` (synthesized whooshes, pops, clicks, risers)
+   - `Local files — my own effects`
+   - `No sound effects`
+4. **Footage and image source** — "Besides the code-drawn p5 graphics, what footage and images may the video use?" (multi-select)
+   - `Mixkit stock video (free footage)`
+   - `Mixkit stock art (free illustrations)`
+   - `Local files — my own footage, photos, or logo`
+   - `None — generate every frame in code`
+5. **Exclusions** — "What styles or things do you NOT want in the video?" (multi-select, free text encouraged)
    - `Emojis / cartoonish icons` · `Bouncy or cheesy transitions` · `Neon or oversaturated colors` · `Dense walls of text`
 
-Record every exclusion as a numbered do-not item (`DN-1`, `DN-2`, …). If the user says "nothing", record `DN: none stated`.
+Record the answers as the **source plan**: `music: mixkit | generated | local | none`, `sfx: …`, `visuals: [mixkit-video, mixkit-art, local] | code-only`. `None — generate every frame in code` together with another option is a contradiction: ask again. Record every exclusion as a numbered do-not item (`DN-1`, `DN-2`, …). If the user says "nothing", record `DN: none stated`.
 
 ### Round 3 — follow-ups driven by the answers
 
 - **ElevenLabs chosen** → get the API key (rules below), validate it, then pick voices.
 - **Kokoro or Coqui chosen** → check `preflight.py`; install if missing (commands in `references/audio.md`); pick a voice per speaker; for Coqui XTTS, tell the user it is under the non-commercial Coqui Public Model License and only proceed with XTTS if they accept.
 - **Voice details** → narrator only, or dialogue with characters (one voice per speaker); voice character (gender, age, tone, pace); who writes the script (user or agent); burned-in captions yes/no.
-- **Music chosen** → energy arc (calm throughout / build to a peak / punchy), tempo feel.
-- **SFX chosen** → any signature moments (a logo sting, a counter, a reveal).
+- **Music from Mixkit** → mood and genre (offer 2–4 drafts: `Modern minimal, upbeat, 110–125 BPM` · `Calm ambient build` · `Cinematic` · `Lo-fi / chill`), energy arc, and whether a moment should land on the track's drop (the payoff, the logo). Tell them you will shortlist tracks for them to listen to in Phase 3.
+- **Music generated in code** → style (`ambient`, `corporate`, `lofi`, `cinematic`, `electronic`), energy arc, tempo feel.
+- **Local music or effects** → the file paths, and confirm they hold the licence for this use (a track bought for personal listening is not licensed for a published video). Never download music from anywhere else to stand in for their file.
+- **SFX (any source)** → density (`subtle` transitions only · `moderate` + key reveals · `rich` + UI clicks, pops, risers, impacts) and any signature moments (a logo sting, a counter, a reveal).
+- **Mixkit footage or art** → subjects and settings to search for (offer drafts from the story: `city at night`, `people working`, `nature close-ups`), which scenes use real footage versus code-drawn worlds, and orientation for 9:16 (Mixkit has vertical clips).
+- **Local visuals** → the files (footage, photos, logo, character art) and what each is for.
+- **Mixkit anything** → say that items come under Mixkit's free licences (https://mixkit.co/license/) and that some stock videos are under a Restricted licence, which you will flag before use.
 
 **ElevenLabs API key rules** (never break these):
 
@@ -94,8 +117,8 @@ Brand assets (logo, colors, fonts, images), characters or mascots, facts/data to
 3. Structure: the beats/scenes and the one idea each carries; hook in the first 3 seconds; ending.
 4. Visual style: world(s), palette, typography, texture, characters, motion character (calm/elegant vs energetic/punchy).
 5. Language of narration and on-screen text; captions.
-6. The four required answers (voice-over, music, SFX, do-not list).
-7. Assets supplied by the user and any constraints (brand rules, legal lines, deadline).
+6. The Round 2 answers: voice-over, the source of music, SFX, and footage/images (Mixkit, generated in code, or local files), and the do-not list.
+7. Local files supplied by the user, who holds their licence, and any constraints (brand rules, legal lines, deadline).
 
 Exit condition: you can restate the video in 3–4 sentences (what it says, to whom, how it looks and sounds, how long) and the user confirms it matches their intent.
 
@@ -124,8 +147,13 @@ Write `VIDEO_PLAN.md` (human plan) and `storyboard.json` (machine storyboard the
 
 ## Audio
 - Voice-over: backend, voice per speaker, pace (or "none")
-- Music: style, bpm, key, energy arc (or "none")
-- SFX: density, signature moments (or "none")
+- Music: source (Mixkit / generated / local), mood or style, energy arc, drop moment (or "none")
+- SFX: source, density, signature moments (or "none")
+
+## Media
+- Source plan (music, SFX, footage and images) as answered in Round 2
+- Per scene: which Mixkit searches, footage, art, or local files it uses (names as in the ledger), or "code-drawn"
+- Licences: Mixkit free licences; any Restricted item and the user's decision about it; local files and their licence holder
 
 ## Storyboard
 | ID | Min length | Visual (what is drawn, what moves) | On-screen text | Narration (speaker: line) | Transition out | SFX |
@@ -150,8 +178,8 @@ Every scene must map to at least one acceptance criterion; every DN item must be
   "captions": true, "snap": "beat",
   "audio": {
     "voiceover": { "backend": "kokoro|elevenlabs|coqui", "voices": { "narrator": "af_heart" }, "speed": 1.0, "model": null, "lang": null },
-    "music": { "style": "ambient|corporate|lofi|cinematic|electronic", "bpm": 90, "key": "D", "seed": 7 },
-    "sfx": { "density": "subtle|moderate|rich" }
+    "music": { "source": "mixkit|user", "track": "music", "start": null, "drop_at": "S3", "fade_out": 2.0 },
+    "sfx": { "source": "mixkit|user|generated", "density": "subtle|moderate|rich" }
   },
   "scenes": [
     { "id": "S1", "component": "title", "min_seconds": 4.5, "energy": 0.35,
@@ -163,6 +191,10 @@ Every scene must map to at least one acceptance criterion; every DN item must be
 }
 ```
 
+- **Ledger music** (`source` `mixkit` or `user`): `track` is the ledger name. `timeline.py` takes the tempo from `media.py measure`, moves `start` (seconds into the track; default its first downbeat) onto a beat, and with `drop_at` starts the track where its measured drop lands on that scene's incoming transition midpoint. **Generated music** keeps the old form: `{ "source": "generated", "style": "…", "bpm": 90, "key": "D", "seed": 7 }`.
+- **SFX cue `type`**: with `mixkit`/`user` SFX it is the ledger name of a sound (`whoosh`, `pop`, `click`, `tick`, `chime`, … — whatever you downloaded under that name; density auto-cues need `whoosh`, `pop`, `click`, and `tick` for cuts); with `generated` SFX it is a `gen_sfx.py` type.
+- **Footage and art** are ledger names too, passed to scenes through `params` (for example `"params": { "clip": "city", "art": "hero" }`); scenes read them from `s.assets.footage` and `s.assets.images`.
+
 Set `audio.voiceover`, `audio.music`, or `audio.sfx` to `null` when the user declined it. Omit a scene's `sfx` to get automatic cues from the density; give `[]` for none.
 
 ---
@@ -171,13 +203,21 @@ Set `audio.voiceover`, `audio.music`, or `audio.sfx` to `null` when the user dec
 
 Present:
 
-1. **Plan summary** — overview, format, style, do-not list, audio plan, and the storyboard table (short; full detail lives in `VIDEO_PLAN.md`).
-2. **Audio previews** (when audio was requested) — generate and give paths plus a play command (`afplay` on macOS, `ffplay -autoexit` elsewhere):
+1. **Plan summary** — overview, format, style, do-not list, source plan, audio plan, and the storyboard table (short; full detail lives in `VIDEO_PLAN.md`).
+2. **Mixkit download and review — a hard gate** (for every resource sourced from Mixkit; commands and details in `references/media.md` → "Download and review"). Download the actual candidate files, let the user play, watch, and look at them, and get their picks **before any implementation**: no scaffold, no ledger, no timeline, and no scene code until the user has reviewed the downloads and answered.
+   1. **Search and pre-select.** Music: 2–4 listings that match the brief (`mixkit.py search music tag/<mood> --save media/candidates.json`). Footage and art: per scene (`mixkit.py search video discover/<subject>`, `mixkit.py search art <category>`), then contact sheets (`mixkit.py sheet video <ids> --out media/thumbs/<scene>.jpg`) — **look at every sheet yourself** and drop clips with watermarks, brand logos, or the wrong mood. SFX: one or two sounds per planned cue name (`mixkit.py search sfx <word>`).
+   2. **Download the candidates for review**: `mixkit.py get media --to media/review --music <id> … --sfx <cue>=<id> … --video <scene>=<id> … --art <scene>=<id> …` — 3–6 tracks, 1–3 clips or artworks per scene, 1–2 sounds per cue. Label footage and art with the scene id and SFX with the cue name. Survey the tracks: `media.py survey media/review/*.mp3 --bpm <lo> <hi>`.
+   3. **Build the review page**: `mixkit.py review media/review` writes `media/review/index.html` (a player for every track and effect, every clip playable, every artwork shown, with numbers, titles, lengths, and licences). Give the user the path and the open command (`open media/review/index.html`; Linux `xdg-open`), plus what you recommend and why (for music: `#n title — bpm, length, drop at N s`). You cannot hear or watch motion: say so.
+   4. **Ask for the picks** through the question tool, one question per resource (music; each scene's footage or art; SFX), options = the candidates by review number, recommended first, with "none of these — search again" as the free-text path. Wait for the user to say they reviewed; a timeout or a preselected option is not a pick.
+   5. **Loop** on "search again" or on notes ("darker", "no people", "slower track"): search, download, rebuild the page, ask again.
+   6. **Restricted licence**: when `get` flags a Stock Video Restricted item (the page marks it too), show the user https://mixkit.co/license/#videoRestricted and ask whether to use it or pick another clip. Default to another clip.
+3. **Generated and voice previews** (when chosen) — give paths plus a play command (`afplay` on macOS, `ffplay -autoexit` elsewhere):
    - one voice sample per speaker: `voiceover.py --backend <b> --voice <v> --sample "<first line>" --out public/vo/_sample-<speaker>.wav`
-   - a 20-second music sample: `gen_music.py --style <s> --bpm <n> --key <k> --duration 20 --out public/music/_sample.wav`
-   - SFX previews: `gen_sfx.py --all --outdir public/sfx/_preview`
+   - generated music: a 20-second sample, `gen_music.py --style <s> --bpm <n> --key <k> --duration 20 --out public/music/_sample.wav`
+   - generated SFX: `gen_sfx.py --all --outdir public/sfx/_preview`
+4. **Local files** — confirm each path exists and plays or opens; list what each is for.
 
-Then ask: approve this plan and start production? Options: yes / revise (loop back to Phase 1 or 2) / stop. Do not scaffold or build without explicit approval.
+Record the picks (review numbers, Mixkit ids, ledger names) in `VIDEO_PLAN.md` → Media. Then ask: approve this plan and start production? Options: yes / revise (loop back to Phase 1 or 2) / stop. Do not scaffold or build without explicit approval.
 
 ---
 
@@ -191,27 +231,42 @@ python3 "$VIDEO_SKILL_DIR/scripts/preflight.py"
 
 - `preflight.py` must pass (Node ≥ 22.12, ffmpeg + ffprobe, Python ≥ 3.9 with numpy + scipy, and in the project: p5.js, Puppeteer, headless Chrome). Node installed through nvm is often a lazy shell function that subprocesses cannot see; preflight prints the real binary — prefix commands with `PATH=<its dir>:$PATH` when needed.
 - Installing Puppeteer downloads `chrome-headless-shell` once (~200 MB, cached in `~/.cache/puppeteer`; the template's `.puppeteerrc.cjs` skips the full Chrome). If the download is blocked, run `npx puppeteer browsers install chrome-headless-shell` later, or point `FRAMECODE_BROWSER` (or `render.js --browser`) at an installed Chrome/Chromium.
-- Replace the example `storyboard.json` with the planned one, set the palette in `theme.js`, register fonts and user images in `project.js`, and remove example scenes the plan does not use.
+- Replace the example `storyboard.json` with the planned one, set the palette in `theme.js`, register fonts in `project.js`, and remove example scenes the plan does not use. `scenes/broll.js` is an unregistered example of a footage scene: copy its pattern, delete it if unused.
+- Media files the approved picks need go into the ledger (`media/`); nothing from Mixkit or the user's disk is copied into scenes by hand.
 - Local TTS: create a project-local environment as shown in `references/audio.md` (`.venv-tts`), then run `voiceover.py` with that interpreter.
 
 ---
 
-## Phase 5 — Audio production (audio drives timing)
+## Phase 5 — Audio and media production (audio drives timing)
 
-Run in this order; each step reads what the previous one wrote. Use the TTS interpreter (for example `.venv-tts/bin/python`) for step 1 when Kokoro or Coqui is the backend.
+Run in this order; each step reads what the previous one wrote. Use the TTS interpreter (for example `.venv-tts/bin/python`) for the voice-over step when Kokoro or Coqui is the backend. `M="$VIDEO_SKILL_DIR/scripts"`.
 
 ```bash
-python3 "$VIDEO_SKILL_DIR/scripts/voiceover.py" --storyboard storyboard.json --out public/vo   # skip if no voice-over
-python3 "$VIDEO_SKILL_DIR/scripts/timeline.py"            # add --estimate when there is no voice-over
-python3 "$VIDEO_SKILL_DIR/scripts/gen_music.py" --timeline src/timeline.json    # skip if no music
-python3 "$VIDEO_SKILL_DIR/scripts/gen_sfx.py" --timeline src/timeline.json      # skip if no SFX
-python3 "$VIDEO_SKILL_DIR/scripts/mix_audio.py"           # skip only when there is no audio at all
+# 1. Media ledger: only the picks the user approved in the Phase 3 review (files are reused from media/review)
+python3 "$M/mixkit.py" get media --music music=<id> --sfx whoosh=<id> pop=<id> --video city=<id> --art hero=<id>
+python3 "$M/media.py" add <name> <file> --kind music|sfx|video|image --license "<who holds it>"   # local files
+python3 "$M/media.py" measure --bpm <lo> <hi>        # tempo, beats, drop; SFX hit points; video/image sizes -> media/MEDIA.md
+# 2. Voice and timing
+python3 "$M/voiceover.py" --storyboard storyboard.json --out public/vo   # skip if no voice-over
+python3 "$M/timeline.py"                              # add --estimate when there is no voice-over
+# 3. Music (one of)
+python3 "$M/media.py" music                           # Mixkit or local track: trim to start, loop whole bars if short, fade out
+python3 "$M/gen_music.py" --timeline src/timeline.json   # generated
+# 4. SFX (one of)
+python3 "$M/media.py" sfx                             # Mixkit or local effects, synced by their measured hit or peak
+python3 "$M/gen_sfx.py" --timeline src/timeline.json     # generated
+# 5. Visuals and mix
+python3 "$M/media.py" visuals                         # footage -> frame sequences, art -> public/images, public/media.json
+python3 "$M/mix_audio.py"                             # skip only when there is no audio at all
+python3 "$M/media.py" credits                         # CREDITS.md from the ledger
 ```
 
-- `timeline.py` sizes every scene to fit its lines (plus lead-in, tail, and both transitions), snaps transition midpoints and the ending to the music's beat grid, places captions, and computes SFX sync frames. `src/timeline.json` is the single source of truth for the engine and the mixer.
+- `media.py measure` flags what needs a decision: low tempo or downbeat confidence (check by ear, then set `bpm`/`firstDownbeat` on the ledger entry), effects with two equal peaks or late hits (set `sync`), long files and clips (set `in`/`out` to the part you use). Read `media/MEDIA.md` after every measure.
+- `timeline.py` sizes every scene to fit its lines (plus lead-in, tail, and both transitions), snaps transition midpoints and the ending to the music's beat grid (a ledger track's measured tempo, its start moved onto a beat), aligns the drop with `drop_at`, places captions, and computes SFX sync frames. `src/timeline.json` is the single source of truth for the engine and the mixer.
 - `mix_audio.py` ducks music under speech and masters to -14 LUFS / -1.5 dBTP (`--lufs`, `--tp`, `--music-db`, `--duck-db`, `--sfx-db` to rebalance).
 - Voice lines are cached by content; only changed lines are regenerated (important with ElevenLabs credits).
-- When something changes, re-run from the first affected step: script/voices → all five; music only → music + mix; SFX only → SFX + mix; visuals only → nothing.
+- When something changes, re-run from the first affected step: script/voices → voice onward; a new track or a new `start`/`drop_at` → measure (new file), timeline onward; SFX only → SFX + mix; footage or art → measure + visuals; scene code only → nothing.
+- Once the track, the effects, and the timing exist, ask the user to listen to the mix (`afplay public/audio/mix.wav`) before building scenes on it: the numbers were measured, not heard.
 - If whisper is installed (`mlx_whisper` or `whisper`), transcribe one or two lines and compare them with the script to catch mispronunciations; fix with the line's `say` field.
 
 ---
@@ -222,7 +277,8 @@ Before writing scene code, read `references/engine.md` (API, including "p5 in sc
 
 - A scene is `{ setup?(info), draw(p, s) }`. `setup` computes layout once; `draw` paints one frame with the p5 instance `p` from the scene context `s` (`s.t`, `s.frame`, `s.enter()`, `s.exit()`, `s.life()`, `s.spring()`, `s.line(n)`, `s.speaking()`, `s.params`, `s.state`, …).
 - Draw with p5 (`p.fill`, `p.circle`, `p.beginShape`, `p.translate`, `p.noise`, `p.text`, …) and the `engine/draw.js` helpers, which take `p` too (`paper(p, …)`, `sketch(p, …)`, `mascot(p, …)`, `wordsIn(p, …)`); they mix freely and share transforms.
-- Draw everything procedurally: paths, gradients, textures, characters, text. Build illustrations in layers (background, midground, subject, foreground, chrome) the way the references in `references/style.md` do; a flat slide with a fading title is not the bar.
+- Draw procedurally: paths, gradients, textures, characters, text. Build illustrations in layers (background, midground, subject, foreground, chrome) the way the references in `references/style.md` do; a flat slide with a fading title is not the bar.
+- Footage and art from the ledger are layers in that stack, not the whole scene: `footage(p, s.assets.footage.city, s.t, x, y, w, h, { from, rate, loop, fit })` draws a clip (frame-exact in renders), `p.image(s.assets.images.hero, …)` or `imageCover` draws art. Grade them toward the palette, mask them into shapes, move the camera over them, and draw type, callouts, and texture on top (`references/media.md` → "Footage and art in scenes"; `scenes/broll.js`). Only use items the user reviewed and picked in Phase 3; a new Mixkit item needed later goes through the same download-and-review step first.
 - Persistent chrome (progress ring, captions, grain) lives in `project.js` `overlay`; per-scene chrome (chapter label) lives in the scene so it transitions with it.
 - Honor every DN item. Keep all motion frame-driven and deterministic.
 
@@ -231,7 +287,7 @@ Before writing scene code, read `references/engine.md` (API, including "p5 in sc
 1. **The engine owns the canvas, the loop, and the clock.** Never call `createCanvas`, `resizeCanvas`, `pixelDensity`, `frameRate`, `loop`/`noLoop`/`redraw`, `saveCanvas`, or `remove`, and never assign `p.setup`/`p.draw`. Sizes are design pixels (`s.w`, `s.h`).
 2. **Time is `s.t`/`s.frame`.** `frameCount`, `millis()`, and `deltaTime` are mapped to the scene's clock, but `frameCount` counts whole frames only, so motion blur sub-frames need `s.t`.
 3. **Randomness is seeded per scene, every frame.** `p.random()`, `p.randomGaussian()`, and `p.noise()` return the same values every frame (stable layouts); feed time into noise for motion (`p.noise(i, s.t * 0.3)`). Take all of an element's `random()` values before any `continue`/`return`, or later values shift and flicker. Never `Math.random`; never `g.random()` on a buffer (unseeded).
-4. **No input, DOM, or loading.** No mouse/keyboard/touch handlers, `createDiv`/`createSlider`, `p5.sound`, or `createCapture`. No `loadImage`/`loadFont`/`loadJSON` in scenes: register fonts and images in `project.js`; images arrive as `p5.Image` in `s.assets.images`, fonts by family name (`p.textFont(THEME.font)`, `p.textWeight(800)`).
+4. **No input, DOM, or loading.** No mouse/keyboard/touch handlers, `createDiv`/`createSlider`, `p5.sound`, `createCapture`, or `createVideo`. No `loadImage`/`loadFont`/`loadJSON` in scenes: ledger art and images arrive as `p5.Image` in `s.assets.images` and footage as clips in `s.assets.footage` (both from `public/media.json`, written by `media.py visuals`); fonts are registered in `project.js` and addressed by family name (`p.textFont(THEME.font)`, `p.textWeight(800)`).
 5. **Offscreen drawing goes through `buffer()`/`baked()`** from `draw.js` (design-px size, sharp at every output scale, 3D with `{ webgl: true }`). Never call `createGraphics` per frame.
 6. **State resets every frame.** Fill, stroke, transforms, text settings, and blend mode start fresh in each `draw`; wrap local changes in `p.push()`/`p.pop()`. Fade groups with `opacity(p, a)`; blur with `setBlur(p, px)` (not `p.filter(BLUR)`, which is slow).
 
@@ -258,7 +314,7 @@ node engine/render.js --stills auto --scale 0.5    # PNG per scene middle and tr
 
 A scene error prints `FAIL` with the scene file and line; a scene stuck in an endless loop fails with a timeout instead of hanging.
 
-View every still with the host's image tool and check it against the storyboard, the acceptance criteria, the style, the motion rules, and the DN list: composition, legibility, safe areas, overflowing or clipped text, stray elements, empty frames. Fix and repeat until clean. Report problems you fixed briefly.
+View every still with the host's image tool and check it against the storyboard, the acceptance criteria, the style, the motion rules, and the DN list: composition, legibility, safe areas, overflowing or clipped text, stray elements, empty frames. For footage: text stays readable over it (grade or panel behind it), the clip does not end or freeze mid-scene (`from` plus scene length fits inside the extracted range, or `loop`), no watermark, logo, or unwanted person is in shot. Fix and repeat until clean. Report problems you fixed briefly.
 
 ---
 
@@ -327,6 +383,7 @@ Note the loop count; 3+ iterations on the same area signal a planning problem �
 Tell the user:
 
 - Deliverable path, resolution, fps, duration, file size, and loudness (as `mix_audio.py` reported it).
+- `CREDITS.md`: every outside item with its source page and licence (Mixkit items under the Mixkit licences, local files under the user's). Remind them that `media/src/` holds the raw downloads, which are licensed for use inside the video, not for passing on as files (terms: https://mixkit.co/license/).
 - What was built vs. the acceptance criteria and DN list.
 - How to reopen the studio (`node engine/studio.js`), change a line or a scene, and re-render (`node engine/render.js --size <WxH>`).
 - Known limitations or ideas for a next version.

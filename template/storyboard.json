@@ -6,8 +6,8 @@
   "snap": "beat",
   "audio": {
     "voiceover": { "backend": "kokoro", "voices": { "narrator": "af_heart" }, "speed": 1.0 },
-    "music": { "style": "ambient", "bpm": 90, "key": "D", "seed": 7 },
-    "sfx": { "density": "subtle" }
+    "music": { "source": "generated", "style": "ambient", "bpm": 90, "key": "D", "seed": 7 },
+    "sfx": { "source": "generated", "density": "subtle" }
   },
   "scenes": [
     {

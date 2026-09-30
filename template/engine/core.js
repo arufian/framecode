@@ -5,6 +5,7 @@
 // previews, final frames, and motion-blur sub-frames.
 
 import { TRANSITIONS } from './transitions.js';
+import { createClip, setFootageLoader, clearFootageMisses, footageMisses, settleFootage } from './media.js';
 
 // ------------------------------------------------------------------ platform
 
@@ -277,6 +278,7 @@ function drawScene(ctx, project, scene, frame, scale) {
  */
 export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
   const { timeline } = project;
+  clearFootageMisses();
   const W = timeline.width * scale, H = timeline.height * scale;
   frame = clamp(frame, 0, timeline.durationInFrames - 1e-6);
   const env = { w: timeline.width, h: timeline.height, scale, frame, t: frame / timeline.fps, fps: timeline.fps, project };
@@ -320,14 +322,37 @@ export function renderFrame(ctx, project, frame, scale = 1, cache = {}) {
   ctx.restore();
 }
 
+/**
+ * renderFrame, repeated until every footage frame it draws is loaded (at most a few
+ * passes; prefetching makes most frames one pass). The renderer uses this, so each
+ * rendered frame shows the exact footage frame for its time.
+ */
+export async function renderFrameReady(ctx, project, frame, scale = 1, cache = {}) {
+  for (let pass = 0; pass < 6; pass++) {
+    renderFrame(ctx, project, frame, scale, cache);
+    if (!footageMisses()) return;
+    await settleFootage();
+  }
+  throw new Error(`frame ${frame}: footage frames still missing after 6 passes`);
+}
+
 // ------------------------------------------------------------------ loading (platform-agnostic)
 
-export async function loadProject(project, { loadJSON, loadImage, loadFont }, timelinePath = 'src/timeline.json') {
+export async function loadProject(project, { loadJSON, loadImage, loadFont, loadBitmap }, timelinePath = 'src/timeline.json') {
   project.timeline = await loadJSON(timelinePath);
   for (const font of project.fonts) await loadFont(font);
   project.surface = await createSurface(project.timeline.width, project.timeline.height);
-  project.assets = { images: {} };
+  project.assets = { images: {}, footage: {} };
   for (const [name, src] of Object.entries(project.images)) project.assets.images[name] = await loadImage(src);
+  // Media prepared by media.py visuals: art/images and footage clips, by ledger name.
+  const media = await loadJSON('public/media.json').catch(() => null);
+  if (media && media.version) {
+    for (const [name, src] of Object.entries(media.images || {})) {
+      if (!project.assets.images[name]) project.assets.images[name] = await loadImage(src);
+    }
+    for (const [name, meta] of Object.entries(media.footage || {})) project.assets.footage[name] = createClip(name, meta);
+  }
+  if (loadBitmap) setFootageLoader(loadBitmap);
   const missing = project.timeline.scenes.filter((s) => !project.scenes[s.component]).map((s) => `${s.id}:${s.component}`);
   if (missing.length) throw new Error(`timeline scenes without a registered component: ${missing.join(', ')}`);
   project.sceneState = {};

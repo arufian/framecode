@@ -2,6 +2,8 @@
 
 All scripts live in `$VIDEO_SKILL_DIR/scripts/` and run from the project root. Everything is 48 kHz. Timing flows one way: voice lines → `timeline.py` → music and SFX → `mix_audio.py`.
 
+Music and SFX have three sources (the user chooses in the interview): **Mixkit** recordings and **local files** go through the media ledger (`mixkit.py`, `media.py`; see `references/media.md` → "Music from the ledger" and "SFX from the ledger"), and **generated** audio comes from `gen_music.py` and `gen_sfx.py` (below). The mixer treats all three the same.
+
 ## Voice-over backends
 
 | Backend | Quality | Cost / licence | Needs |
@@ -61,7 +63,7 @@ Set `audio.voiceover.model` for another model and `audio.voiceover.lang` for mul
 - For dialogue, give each speaker a distinct voice and a caption colour (`captions(..., { colors })` in `project.js`).
 - Samples for the confirmation step: `voiceover.py --backend kokoro --voice af_heart --sample "…" --out public/vo/_sample.wav`.
 
-## Music (`gen_music.py`)
+## Generated music (`gen_music.py`, `"source": "generated"`)
 
 Original music composed and synthesized from oscillators and noise: voice-led chord progressions, pads, plucks, electric piano, bells, bass, drums, reverb, and a mastered ending on the tonic.
 
@@ -77,7 +79,7 @@ Original music composed and synthesized from oscillators and noise: voice-led ch
 - `seed` changes the arrangement details; `key` and `bpm` in `storyboard.json` also drive beat snapping.
 - The standalone file is mastered to -16 LUFS (`--lufs`) so samples sound right on their own.
 
-## Sound effects (`gen_sfx.py`)
+## Generated sound effects (`gen_sfx.py`, `"source": "generated"`)
 
 `gen_sfx.py --list` prints the catalogue. Each effect has a sync point, aligned to its cue:
 
@@ -101,4 +103,6 @@ Cue fields in `storyboard.json`: `type`, `at` (`transition_out`, `transition_in`
 - Speech is levelled to -20 dBFS RMS per line; music sits 8 dB under speech and ducks a further 9 dB while anyone speaks (0.25 s attack, 0.5 s release); SFX use their cue gain (defaults per type).
 - The sum is mastered to **-14 LUFS integrated, -1.5 dBTP** (web/social). Use `--lufs -16` for podcasts/Apple, `--lufs -23` for broadcast.
 - Rebalance: `--music-db` (default -8 with voice, 0 without), `--duck-db`, `--sfx-db`, `--vo-db`; `--stems` writes `stem-vo/music/sfx.wav` for inspection.
+- Ledger music (Mixkit or local) arrives from `media.py music` already trimmed to `start`, bar-looped if short, and faded out; the mixer levels it like generated music. Ledger SFX arrive from `media.py sfx` peak-normalized with per-name default gains, so `gainDb` means the same for all sources.
 - The renderer muxes `public/audio/mix.wav` into `out/final.mp4` as AAC 320 kb/s.
+- **You cannot hear.** After mixing, ask the user to listen (`afplay public/audio/mix.wav`), especially the track's start, the drop, and each effect against its visual; rebalance with the flags above.

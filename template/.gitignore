@@ -4,3 +4,7 @@ out/
 .venv-tts/
 .vo-eleven.tmp
 .DS_Store
+media/src/
+media/review/
+media/thumbs/
+public/footage/

@@ -162,6 +162,7 @@
     "style": "ambient",
     "key": "D",
     "seed": 7,
+    "source": "generated",
     "bpm": 90.0,
     "src": "music/music.wav",
     "sections": [
