@@ -12,6 +12,7 @@ const state = {
   project: null, timeline: null, frame: saved.frame || 0, playing: false, loop: !!saved.loop, muted: !!saved.muted,
   safe: !!saved.safe, speed: saved.speed || 1, zoom: saved.zoom || 'fit', scale: 1, dirty: true,
   clockStart: 0, clockFrame: 0, audio: null, audioOk: false, notes: [], drawTimes: [], cache: {},
+  followers: [], gains: null, audioCtx: null, mix: {}, // stems: music (and VO) follow the SFX stem
 };
 
 // ------------------------------------------------------------------ helpers
@@ -172,7 +173,9 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 function seek(frame, { fromAudio = false } = {}) {
   state.frame = clamp(Math.round(frame), 0, total() - 1);
   if (state.playing) { state.clockStart = performance.now(); state.clockFrame = state.frame; }
-  if (!fromAudio && state.audio && state.audioOk) state.audio.currentTime = state.frame / fps();
+  if (!fromAudio && state.audio && state.audioOk) {
+    for (const a of [state.audio, ...state.followers]) a.currentTime = state.frame / fps();
+  }
   state.dirty = true;
   persist();
 }
@@ -182,9 +185,12 @@ function play(on = !state.playing) {
   state.clockStart = performance.now();
   state.clockFrame = state.frame;
   if (state.audio && state.audioOk) {
-    state.audio.playbackRate = state.speed;
-    state.audio.currentTime = state.frame / fps();
-    if (on) state.audio.play().catch(() => {}); else state.audio.pause();
+    if (on) state.audioCtx?.resume();
+    for (const a of [state.audio, ...state.followers]) {
+      a.playbackRate = state.speed;
+      a.currentTime = state.frame / fps();
+      if (on) a.play().catch(() => {}); else a.pause();
+    }
   }
   state.dirty = true;
 }
@@ -197,6 +203,9 @@ function loopBounds() {
 function tick() {
   if (state.project && state.playing) {
     const useAudio = state.audio && state.audioOk && !state.audio.paused;
+    if (useAudio) {
+      for (const f of state.followers) if (Math.abs(f.currentTime - state.audio.currentTime) > 0.06) f.currentTime = state.audio.currentTime;
+    }
     let next = useAudio ? Math.floor(state.audio.currentTime * fps() + 1e-6)
       : Math.floor(state.clockFrame + ((performance.now() - state.clockStart) / 1000) * fps() * state.speed);
     const [lo, hi] = state.loop ? state.loopRange || (state.loopRange = loopBounds()) : [0, total()];
@@ -227,12 +236,53 @@ async function refreshAudio() {
   if (!status.exists) { badge.textContent = 'audio mix missing — run mix_audio.py'; badge.className = 'badge bad'; return; }
   badge.textContent = status.stale ? 'audio stale — re-run mix_audio.py' : 'audio synced';
   badge.className = `badge ${status.stale ? 'warn' : 'ok'}`;
-  const audio = new Audio(`${status.src}?v=${Date.now()}`);
-  audio.preload = 'auto';
-  audio.muted = state.muted;
+  const load = (src) => { const a = new Audio(`${src}?v=${Date.now()}`); a.preload = 'auto'; return a; };
+  state.mix = status.mix || {};
+  // With stems, the SFX stem is the clock; music and SFX play through gain nodes the sliders control.
+  const audio = load(status.stems ? status.stems.sfx : status.src);
   audio.addEventListener('canplay', () => { state.audioOk = true; }, { once: true });
   audio.addEventListener('error', () => { state.audioOk = false; badge.textContent = 'audio failed to load'; badge.className = 'badge bad'; });
   state.audio = audio;
+  if (!status.stems) { audio.muted = state.muted; return; }
+  state.audioCtx = new AudioContext();
+  const route = (el) => {
+    const gain = state.audioCtx.createGain();
+    state.audioCtx.createMediaElementSource(el).connect(gain).connect(state.audioCtx.destination);
+    return gain;
+  };
+  const music = load(status.stems.music);
+  state.gains = { sfx: route(audio), music: route(music) };
+  state.followers = [music];
+  if (status.stems.vo) { const vo = load(status.stems.vo); vo.muted = state.muted; state.followers.push(vo); }
+  for (const [name, { set }] of Object.entries(LEVELS)) {
+    $(`${name}-vol`).value = String(state.mix[set] ?? 0);
+    $(`${name}-ctl`).classList.remove('hidden');
+  }
+  applyLevels();
+}
+
+// Each stem was mixed at its mixed*Db level (review/mix.json); its slider plays the difference live.
+const LEVELS = { music: { set: 'musicDb', mixed: 'mixedMusicDb' }, sfx: { set: 'sfxDb', mixed: 'mixedSfxDb' } };
+function applyLevels() {
+  let changed = false;
+  for (const [name, { set, mixed }] of Object.entries(LEVELS)) {
+    const db = state.mix[set] ?? 0, base = state.mix[mixed] ?? db;
+    $(`${name}-db`).textContent = `${db > 0 ? '+' : ''}${db} dB`;
+    if (state.gains?.[name]) state.gains[name].gain.value = state.muted ? 0 : 10 ** ((db - base) / 20);
+    if (db !== base) changed = true;
+  }
+  if (changed) { const badge = $('audio-badge'); badge.textContent = 'audio level changed — remix before render'; badge.className = 'badge warn'; }
+}
+
+let saveMix = null;
+for (const [name, { set }] of Object.entries(LEVELS)) {
+  $(`${name}-vol`).oninput = (e) => {
+    state.mix[set] = Number(e.target.value);
+    applyLevels();
+    clearTimeout(saveMix);
+    saveMix = setTimeout(() => fetch('/__api/mix', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ musicDb: state.mix.musicDb ?? 0, sfxDb: state.mix.sfxDb ?? 0 }) }), 300);
+  };
 }
 
 async function refreshNotes() {
@@ -287,13 +337,20 @@ $('step-fwd').onclick = () => { play(false); seek(state.frame + 1); };
 $('prev-scene').onclick = () => sceneJump(-1);
 $('next-scene').onclick = () => sceneJump(1);
 $('loop').onchange = (e) => { state.loop = e.target.checked; state.loopRange = null; persist(); state.dirty = true; };
-$('mute').onchange = (e) => { state.muted = e.target.checked; if (state.audio) state.audio.muted = state.muted; persist(); };
+$('mute').onchange = (e) => {
+  state.muted = e.target.checked;
+  if (state.audio && !state.gains) state.audio.muted = state.muted;
+  for (const f of state.followers.slice(1)) f.muted = state.muted; // VO; music and SFX mute through their gains
+  applyLevels();
+  persist();
+};
 $('safe-toggle').onchange = (e) => { state.safe = e.target.checked; $('safe').classList.toggle('hidden', !state.safe); persist(); };
 $('speed').onchange = (e) => { state.speed = Number(e.target.value); if (state.playing) play(true); persist(); };
 $('zoom').onchange = (e) => { state.zoom = e.target.value; layout(); persist(); };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.target.type === 'range' && e.key.startsWith('Arrow')) return; // arrows move the slider
   if (!state.timeline) return;
   const big = Math.round(fps());
   const actions = {

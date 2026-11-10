@@ -461,11 +461,42 @@ class MixTests(unittest.TestCase):
             al.save_json(path, timeline)
             out = public / "audio" / "mix.wav"
             subprocess.run([sys.executable, str(SCRIPTS / "mix_audio.py"), "--timeline", str(path), "--public",
-                            str(public), "--out", str(out)], check=True, capture_output=True)
+                            str(public), "--out", str(out)], check=True, capture_output=True, cwd=d)
             report = json.loads(out.with_suffix(".json").read_text())
             self.assertAlmostEqual(report["lufs"], -14.0, delta=0.3)
             self.assertLessEqual(report["true_peak"], -1.5)
             self.assertEqual(len(al.read_audio(out)), 8 * SR)
+
+    def test_studio_levels_file_sets_stems_and_is_recorded(self):
+        with tempfile.TemporaryDirectory() as d:
+            public = Path(d) / "public"
+            (public / "music").mkdir(parents=True)
+            (public / "sfx").mkdir()
+            al.write_wav(public / "music" / "music.wav", sine(110, 4.0, 0.2))
+            al.write_wav(public / "sfx" / "pop.wav", sine(880, 0.2, 0.5))
+            timeline = {"fps": 60, "durationInFrames": 240, "scenes": [], "lines": [],
+                        "sfx": [{"type": "pop", "from": 60, "src": "sfx/pop.wav", "gainDb": -6}],
+                        "music": {"src": "music/music.wav"}}
+            path = Path(d) / "timeline.json"
+            al.save_json(path, timeline)
+            levels = Path(d) / "review" / "mix.json"
+            levels.parent.mkdir()
+            al.save_json(levels, {"musicDb": -6, "sfxDb": 3})
+            out = public / "audio" / "mix.wav"
+
+            def run(*extra):
+                subprocess.run([sys.executable, str(SCRIPTS / "mix_audio.py"), "--timeline", str(path), "--public",
+                                str(public), "--out", str(out), "--levels", str(levels), *extra],
+                               check=True, capture_output=True)
+                stem = lambda name: al.rms_db(al.read_audio(out.parent / f"stem-{name}.wav"))
+                return stem("music") - stem("sfx"), json.loads(levels.read_text())
+
+            balance_file, saved = run()
+            self.assertEqual((saved["mixedMusicDb"], saved["mixedSfxDb"]), (-6, 3))
+            self.assertTrue((out.parent / "stem-vo.wav").is_file())
+            balance_flags, saved = run("--music-db", "0", "--sfx-db", "0")
+            self.assertEqual((saved["musicDb"], saved["mixedMusicDb"], saved["sfxDb"]), (0, 0, 0))
+            self.assertAlmostEqual(balance_flags - balance_file, 9.0, delta=0.5)
 
 
 class FakeEleven(http.server.BaseHTTPRequestHandler):

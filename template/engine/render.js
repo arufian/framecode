@@ -275,6 +275,10 @@ async function renderVideo(browser, srv, timeline, args) {
     if (statSync(mix).mtimeMs < statSync('src/timeline.json').mtimeMs) {
       console.warn(`warning: ${mix} is older than src/timeline.json - re-run mix_audio.py if the timeline changed`);
     }
+    const levels = (() => { try { return JSON.parse(readFileSync('review/mix.json', 'utf8')); } catch { return {}; } })();
+    if (levels.musicDb !== levels.mixedMusicDb || levels.sfxDb !== levels.mixedSfxDb) {
+      console.warn(`warning: the studio's music/SFX levels in review/mix.json are not in ${mix} - re-run mix_audio.py`);
+    }
     await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', args.out, '-i', mix, '-map', '0:v:0', '-map', '1:a:0',
       '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-shortest', '-movflags', '+faststart', args.final]);
     console.log(`Final (video + mastered audio): ${args.final}`);

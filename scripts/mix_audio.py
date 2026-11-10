@@ -6,6 +6,12 @@ ducks while anyone speaks; SFX use each cue's gainDb. The sum is mastered to
 the target integrated loudness with a true-peak ceiling (defaults: -14 LUFS,
 -1.5 dBTP, the common web/social delivery spec).
 
+Music and SFX levels come from --music-db / --sfx-db, else from the levels file
+the studio's sliders write (review/mix.json: musicDb, sfxDb), else the defaults.
+The levels used are written back to that file (mixedMusicDb, mixedSfxDb), and
+stems (stem-vo/music/sfx.wav) are written next to the mix so the studio can play
+music and SFX at new levels live.
+
   mix_audio.py --timeline src/timeline.json --public public --out public/audio/mix.wav
 """
 
@@ -102,13 +108,21 @@ def main():
     parser.add_argument("--tp", type=float, default=-1.5, help="True-peak ceiling, dBTP")
     parser.add_argument("--music-db", type=float, help="Music level vs speech (default -8 with VO, 0 without)")
     parser.add_argument("--duck-db", type=float, default=9.0, help="Extra music attenuation under speech")
-    parser.add_argument("--sfx-db", type=float, default=0.0, help="Offset added to every cue's gainDb")
+    parser.add_argument("--sfx-db", type=float, help="Offset added to every cue's gainDb (default 0)")
     parser.add_argument("--vo-db", type=float, default=0.0)
-    parser.add_argument("--stems", action="store_true", help="Also write vo/music/sfx stems next to --out")
+    parser.add_argument("--levels", type=Path, default=Path("review/mix.json"),
+                        help="Levels file the studio sliders write; read for unset --music-db/--sfx-db, then updated")
+    parser.add_argument("--stems", action=argparse.BooleanOptionalAction, default=True,
+                        help="Write vo/music/sfx stems next to --out (the studio's level sliders need them)")
     args = parser.parse_args()
 
     timeline = al.load_json(args.timeline)
-    vo, music, sfx = mix(timeline, args.public, args.music_db, args.duck_db, args.sfx_db, args.vo_db)
+    levels = al.load_json(args.levels, {})
+    music_db = args.music_db if args.music_db is not None else levels.get("musicDb")
+    if music_db is None:
+        music_db = -8.0 if speech_intervals(timeline.get("lines", []), timeline["fps"]) else 0.0
+    sfx_db = args.sfx_db if args.sfx_db is not None else levels.get("sfxDb", 0.0)
+    vo, music, sfx = mix(timeline, args.public, music_db, args.duck_db, sfx_db, args.vo_db)
     total = vo + music + sfx
     if not np.abs(total).max() > 0:
         raise SystemExit("mix is silent: no VO lines, music, or SFX with rendered files in the timeline")
@@ -119,13 +133,17 @@ def main():
     if args.stems:
         for name, stem in (("vo", vo), ("music", music), ("sfx", sfx)):
             al.write_wav(args.out.with_name(f"stem-{name}.wav"), stem * gain)
+    levels.update(musicDb=music_db, sfxDb=sfx_db, mixedMusicDb=music_db, mixedSfxDb=sfx_db)
+    args.levels.parent.mkdir(parents=True, exist_ok=True)
+    al.save_json(args.levels, levels)
     report = {**stats, "seconds": round(len(mastered) / al.SR, 3), "target_lufs": args.lufs, "tp_ceiling": args.tp,
               "vo_lines": sum(1 for l in timeline.get("lines", []) if l.get("src")),
               "sfx_cues": sum(1 for c in timeline.get("sfx", []) if c.get("src")),
-              "music": bool(np.abs(music).max() > 0)}
+              "music": bool(np.abs(music).max() > 0), "music_db": music_db, "sfx_db": sfx_db}
     al.save_json(args.out.with_suffix(".json"), report)
     print(f"Mix: {report['seconds']}s, {stats['lufs']} LUFS, {stats['true_peak']} dBTP, "
-          f"{report['vo_lines']} lines, {report['sfx_cues']} sfx, music={report['music']} -> {args.out}")
+          f"{report['vo_lines']} lines, {report['sfx_cues']} sfx, music={report['music']}, "
+          f"music {music_db:+g} dB, sfx {sfx_db:+g} dB -> {args.out}")
     return 0
 
 

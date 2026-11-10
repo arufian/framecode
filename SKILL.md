@@ -263,7 +263,7 @@ python3 "$M/media.py" credits                         # CREDITS.md from the ledg
 
 - `media.py measure` flags what needs a decision: low tempo or downbeat confidence (check by ear, then set `bpm`/`firstDownbeat` on the ledger entry), effects with two equal peaks or late hits (set `sync`), long files and clips (set `in`/`out` to the part you use). Read `media/MEDIA.md` after every measure.
 - `timeline.py` sizes every scene to fit its lines (plus lead-in, tail, and both transitions), snaps transition midpoints and the ending to the music's beat grid (a ledger track's measured tempo, its start moved onto a beat), aligns the drop with `drop_at`, places captions, and computes SFX sync frames. `src/timeline.json` is the single source of truth for the engine and the mixer.
-- `mix_audio.py` ducks music under speech and masters to -14 LUFS / -1.5 dBTP (`--lufs`, `--tp`, `--music-db`, `--duck-db`, `--sfx-db` to rebalance).
+- `mix_audio.py` ducks music under speech and masters to -14 LUFS / -1.5 dBTP (`--lufs`, `--tp`, `--music-db`, `--duck-db`, `--sfx-db` to rebalance). Unset music and SFX levels come from the studio's sliders (`review/mix.json`); it writes the levels it used back there and writes `stem-*.wav` next to the mix for the studio.
 - Voice lines are cached by content; only changed lines are regenerated (important with ElevenLabs credits).
 - When something changes, re-run from the first affected step: script/voices → voice onward; a new track or a new `start`/`drop_at` → measure (new file), timeline onward; SFX only → SFX + mix; footage or art → measure + visuals; scene code only → nothing.
 - Once the track, the effects, and the timing exist, ask the user to listen to the mix (`afplay public/audio/mix.wav`) before building scenes on it: the numbers were measured, not heard.
@@ -326,12 +326,12 @@ Start the studio in the background (Claude Code: Bash with `run_in_background`) 
 node engine/studio.js --port 4600     # add --open to launch the browser; pick another port if busy
 ```
 
-Tell the user what the studio does: plays the video live with the final audio mix, scrubs and steps frame by frame, jumps between scenes, loops a scene, shows safe areas, and lets them **add notes at any moment** (saved to `review/notes.json`). Code edits hot-reload in place. The studio needs a Chromium-based browser or Firefox (Canvas `filter` support).
+Tell the user what the studio does: plays the video live with the final audio mix, scrubs and steps frame by frame, jumps between scenes, loops a scene, shows safe areas, sets the **music and SFX levels with two sliders** (heard live, saved to `review/mix.json`), and lets them **add notes at any moment** (saved to `review/notes.json`). Code edits hot-reload in place. The studio needs a Chromium-based browser or Firefox (Canvas `filter` support).
 
 Loop:
 
 1. Wait for the user to say they have reviewed (or to give feedback in chat).
-2. Read `review/notes.json`. Fix every note with status `open` (root cause, not symptom). Re-run Phase 5 steps if the fix touches script, voices, music, or SFX; the studio's audio badge turns "stale" until `mix_audio.py` runs again.
+2. Read `review/notes.json`. Fix every note with status `open` (root cause, not symptom). Re-run Phase 5 steps if the fix touches script, voices, music, or SFX; the studio's audio badge turns "stale" until `mix_audio.py` runs again. If the user moved a level slider (badge: "audio level changed — remix before render"), run `mix_audio.py`: it picks up the new levels.
 3. For each fixed note set `"status": "resolved"` and add a one-line `"resolution"` in the JSON. The studio shows it crossed out with the resolution.
 4. Re-run Phase 7, then tell the user what changed and ask them to review again.
 
@@ -363,6 +363,7 @@ node engine/render.js --size <WxH>          # -> out/video.mp4 (picture) and out
 - Frames are drawn in headless Chrome by the same p5 code the studio ran, then encoded to H.264, yuv420p, BT.709, CRF 16, `-preset slow`, with parallel workers (`--workers N` Chrome pages, each with its own ffmpeg) and an exact frame count.
 - `--motion-blur 4` renders 4 sub-frames per frame (180° shutter) for very fast motion; it multiplies render time. Offer it only when the plan has fast moves.
 - If there is no audio at all, `out/video.mp4` is the deliverable.
+- Run `mix_audio.py` first if the studio's level sliders changed since the last mix; the renderer warns when `review/mix.json` holds levels the mix does not.
 
 ---
 

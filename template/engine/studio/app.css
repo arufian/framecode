@@ -76,3 +76,5 @@ code { font-family: var(--mono); font-size: 12px; }
   .layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .side { border-left: 0; border-top: 1px solid var(--line); max-height: 40vh; }
 }
+#music-vol, #sfx-vol { width: 110px; accent-color: var(--accent); }
+#music-db, #sfx-db { min-width: 44px; color: var(--text); }

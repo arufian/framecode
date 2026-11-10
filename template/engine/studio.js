@@ -16,9 +16,12 @@ const args = process.argv.slice(2);
 const port = Number(args[args.indexOf('--port') + 1]) || Number(process.env.STUDIO_PORT) || 4600;
 const host = '127.0.0.1';
 const notesFile = path.join(root, 'review', 'notes.json');
+const mixFile = path.join(root, 'review', 'mix.json'); // music and SFX levels set with the studio sliders; mix.sh reads it
 
 const readNotes = () => { try { return JSON.parse(readFileSync(notesFile, 'utf8')); } catch { return []; } };
 const writeNotes = (notes) => { mkdirSync(path.dirname(notesFile), { recursive: true }); writeFileSync(notesFile, JSON.stringify(notes, null, 2) + '\n'); };
+const readMix = () => { try { return JSON.parse(readFileSync(mixFile, 'utf8')); } catch { return {}; } };
+const writeMix = (mix) => { mkdirSync(path.dirname(mixFile), { recursive: true }); writeFileSync(mixFile, JSON.stringify(mix, null, 2) + '\n'); };
 
 function body(req) {
   return new Promise((resolve, reject) => {
@@ -40,7 +43,14 @@ function audioStatus() {
       ...timeline.sfx.filter((c) => c.src).map((c) => path.join(root, 'public', c.src)),
       ...(timeline.music ? [path.join(root, 'public', timeline.music.src)] : [])];
     const stale = inputs.some((f) => existsSync(f) && statSync(f).mtimeMs > mixTime + 1000);
-    return { planned: true, exists: true, stale, src: `/public/${timeline.audio.mix}` };
+    // Stems written with the mix (mix_audio.py --stems) let the studio change the music level live.
+    const stemFile = (name) => path.join(path.dirname(mix), `stem-${name}.wav`);
+    const fresh = (name) => existsSync(stemFile(name)) && statSync(stemFile(name)).mtimeMs >= mixTime - 1000;
+    const stemSrc = (name) => `/public/${path.posix.join(path.posix.dirname(timeline.audio.mix), `stem-${name}.wav`)}`;
+    const stems = timeline.music && fresh('music') && fresh('sfx')
+      ? { music: stemSrc('music'), sfx: stemSrc('sfx'), ...(timeline.audio.vo && fresh('vo') && { vo: stemSrc('vo') }) }
+      : null;
+    return { planned: true, exists: true, stale, src: `/public/${timeline.audio.mix}`, stems, mix: readMix() };
   } catch (error) {
     return { planned: false, error: String(error) };
   }
@@ -75,6 +85,17 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (pathname === '/__api/status') return send(res, 200, audioStatus());
+    if (pathname === '/__api/mix' && req.method === 'GET') return send(res, 200, readMix());
+    if (pathname === '/__api/mix' && req.method === 'POST') {
+      const { musicDb, sfxDb } = await body(req);
+      const update = Object.fromEntries(Object.entries({ musicDb, sfxDb }).filter(([, db]) => db !== undefined));
+      if (!Object.keys(update).length || !Object.values(update).every(Number.isFinite)) {
+        return send(res, 400, { error: 'musicDb and sfxDb must be numbers' });
+      }
+      const mix = { ...readMix(), ...update };
+      writeMix(mix);
+      return send(res, 200, mix);
+    }
     if (pathname === '/__api/notes' && req.method === 'GET') return send(res, 200, readNotes());
     if (pathname === '/__api/notes' && req.method === 'POST') {
       const { frame, time, scene, text } = await body(req);

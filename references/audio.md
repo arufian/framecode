@@ -102,7 +102,9 @@ Cue fields in `storyboard.json`: `type`, `at` (`transition_out`, `transition_in`
 
 - Speech is levelled to -20 dBFS RMS per line; music sits 8 dB under speech and ducks a further 9 dB while anyone speaks (0.25 s attack, 0.5 s release); SFX use their cue gain (defaults per type).
 - The sum is mastered to **-14 LUFS integrated, -1.5 dBTP** (web/social). Use `--lufs -16` for podcasts/Apple, `--lufs -23` for broadcast.
-- Rebalance: `--music-db` (default -8 with voice, 0 without), `--duck-db`, `--sfx-db`, `--vo-db`; `--stems` writes `stem-vo/music/sfx.wav` for inspection.
+- Rebalance: `--music-db` (default -8 with voice, 0 without), `--duck-db`, `--sfx-db`, `--vo-db`.
+- Studio levels: unset `--music-db` / `--sfx-db` come from `review/mix.json` (`musicDb`, `sfxDb`), which the studio's music and SFX sliders write (`--levels` points elsewhere). After mixing, the levels used are written back (`musicDb`, `sfxDb`, `mixedMusicDb`, `mixedSfxDb`), so the sliders show them and the studio knows what the stems hold.
+- Stems: `stem-vo/music/sfx.wav` are written next to the mix by default (`--no-stems` skips them); the studio plays them to preview slider changes live.
 - Ledger music (Mixkit or local) arrives from `media.py music` already trimmed to `start`, bar-looped if short, and faded out; the mixer levels it like generated music. Ledger SFX arrive from `media.py sfx` peak-normalized with per-name default gains, so `gainDb` means the same for all sources.
 - The renderer muxes `public/audio/mix.wav` into `out/final.mp4` as AAC 320 kb/s.
-- **You cannot hear.** After mixing, ask the user to listen (`afplay public/audio/mix.wav`), especially the track's start, the drop, and each effect against its visual; rebalance with the flags above.
+- **You cannot hear.** After mixing, ask the user to listen (`afplay public/audio/mix.wav`), especially the track's start, the drop, and each effect against its visual; rebalance with the flags above, or let the user set the music and SFX sliders in the studio and re-run the mixer.
